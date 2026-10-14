@@ -36,8 +36,8 @@ class InspectorPanel(QWidget):
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(16)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(20)
 
         # --------------------------------------------------------------
         # Cabeçalho: "Faixa Selecionada"
@@ -51,9 +51,9 @@ class InspectorPanel(QWidget):
         # --------------------------------------------------------------
         metrics_group = QGroupBox("Métricas Analisadas")
         metrics_layout = QGridLayout(metrics_group)
-        metrics_layout.setContentsMargins(16, 24, 16, 16)
-        metrics_layout.setHorizontalSpacing(24)
-        metrics_layout.setVerticalSpacing(12)
+        metrics_layout.setContentsMargins(20, 28, 20, 20)
+        metrics_layout.setHorizontalSpacing(28)
+        metrics_layout.setVerticalSpacing(14)
 
         # Labels de métricas (chave -> (label texto, valor inicial))
         self._metric_labels = {}
@@ -74,12 +74,14 @@ class InspectorPanel(QWidget):
 
             lbl = QLabel(label_text)
             lbl.setProperty("subheading", True)
+            lbl.setWordWrap(True)
             metrics_layout.addWidget(lbl, row, col)
 
             val = QLabel(default)
             val.setProperty("metric", True)
             val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            val.setMinimumWidth(140)
+            val.setMinimumWidth(150)
+            val.setWordWrap(True)
             metrics_layout.addWidget(val, row, col + 1)
 
             self._metric_labels[key] = val
@@ -101,12 +103,12 @@ class InspectorPanel(QWidget):
         # --------------------------------------------------------------
         config_group = QGroupBox("Configuração de Normalização")
         config_layout = QVBoxLayout(config_group)
-        config_layout.setContentsMargins(16, 24, 16, 16)
-        config_layout.setSpacing(16)
+        config_layout.setContentsMargins(20, 28, 20, 20)
+        config_layout.setSpacing(18)
 
         # Preset Selector
         preset_layout = QHBoxLayout()
-        preset_layout.setSpacing(12)
+        preset_layout.setSpacing(16)
         preset_lbl = QLabel("Preset")
         preset_lbl.setProperty("subheading", True)
         preset_lbl.setFixedWidth(70)
@@ -129,9 +131,9 @@ class InspectorPanel(QWidget):
         self.advanced_group.setCheckable(True)
         self.advanced_group.setChecked(False)
         adv_layout = QGridLayout(self.advanced_group)
-        adv_layout.setContentsMargins(16, 24, 16, 16)
-        adv_layout.setHorizontalSpacing(24)
-        adv_layout.setVerticalSpacing(16)
+        adv_layout.setContentsMargins(20, 28, 20, 20)
+        adv_layout.setHorizontalSpacing(28)
+        adv_layout.setVerticalSpacing(18)
 
         # Loudness Alvo
         loud_lbl = QLabel("Loudness Alvo (LUFS)")
@@ -145,6 +147,7 @@ class InspectorPanel(QWidget):
         self.target_loudness.setValue(-14.0)
         self.target_loudness.setSuffix(" LUFS")
         self.target_loudness.setToolTip("Loudness integrado alvo segundo EBU R128")
+        self.target_loudness.setMinimumWidth(140)
         adv_layout.addWidget(self.target_loudness, 0, 1)
 
         # True Peak Alvo
@@ -159,6 +162,7 @@ class InspectorPanel(QWidget):
         self.target_true_peak.setValue(-1.0)
         self.target_true_peak.setSuffix(" dBTP")
         self.target_true_peak.setToolTip("Limite de True Peak para evitar clipping em conversão lossy")
+        self.target_true_peak.setMinimumWidth(140)
         adv_layout.addWidget(self.target_true_peak, 1, 1)
 
         # LRA Alvo (opcional, apenas exibição informativa)
@@ -174,6 +178,7 @@ class InspectorPanel(QWidget):
         self.target_lra.setSuffix(" LU")
         self.target_lra.setEnabled(False)  # Fixado em 11 LU por enquanto
         self.target_lra.setToolTip("Loudness Range alvo (fixo em 11 LU para loudnorm linear)")
+        self.target_lra.setMinimumWidth(140)
         adv_layout.addWidget(self.target_lra, 2, 1)
 
         adv_layout.setColumnStretch(2, 1)

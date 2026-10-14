@@ -152,18 +152,19 @@ class MainWindow(QMainWindow):
         footer = QWidget()
         footer.setObjectName("footer")
         footer_layout = QHBoxLayout(footer)
-        footer_layout.setContentsMargins(8, 8, 8, 8)
-        footer_layout.setSpacing(16)
+        footer_layout.setContentsMargins(12, 10, 12, 10)
+        footer_layout.setSpacing(20)
 
         # Pasta de Saída
         out_lbl = QLabel("Saída:")
         out_lbl.setProperty("subheading", True)
+        out_lbl.setMinimumWidth(40)
         footer_layout.addWidget(out_lbl)
 
         self.txt_output_folder = QLineEdit()
         self.txt_output_folder.setReadOnly(True)
         self.txt_output_folder.setPlaceholderText("Selecione a pasta de saída…")
-        self.txt_output_folder.setMinimumWidth(300)
+        self.txt_output_folder.setMinimumWidth(350)
         self.txt_output_folder.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         footer_layout.addWidget(self.txt_output_folder, 1)
 
@@ -180,14 +181,15 @@ class MainWindow(QMainWindow):
         # Progress Bar
         prog_lbl = QLabel("Progresso:")
         prog_lbl.setProperty("subheading", True)
+        prog_lbl.setMinimumWidth(65)
         footer_layout.addWidget(prog_lbl)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.progress_bar.setFixedWidth(220)
+        self.progress_bar.setFixedWidth(260)
         self.progress_bar.setTextVisible(True)
-        self.progress_bar.setFormat("%p%")
+        self.progress_bar.setFormat("%p%  (%v/%m)")
         footer_layout.addWidget(self.progress_bar)
 
         # Separador
@@ -200,14 +202,15 @@ class MainWindow(QMainWindow):
         self.btn_cancel = QPushButton("Cancelar Operação")
         self.btn_cancel.setProperty("danger", True)
         self.btn_cancel.setEnabled(False)
+        self.btn_cancel.setMinimumWidth(140)
         self.btn_cancel.clicked.connect(self.batch_cancel_requested.emit)
         footer_layout.addWidget(self.btn_cancel)
 
         # Botão Principal — INICIAR LOTE
         self.btn_start_batch = QPushButton("INICIAR LOTE")
         self.btn_start_batch.setProperty("primary", True)
-        self.btn_start_batch.setMinimumWidth(160)
-        self.btn_start_batch.setMinimumHeight(36)
+        self.btn_start_batch.setMinimumWidth(180)
+        self.btn_start_batch.setMinimumHeight(38)
         self.btn_start_batch.clicked.connect(self._on_start_batch)
         footer_layout.addWidget(self.btn_start_batch)
 

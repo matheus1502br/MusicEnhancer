@@ -156,9 +156,17 @@ class MusicTableWidget(QTableWidget):
         header.setSectionResizeMode(self.COL_LUFS, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(self.COL_TRUE_PEAK, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(self.COL_BITRATE, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(self.COL_STATUS, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(self.COL_STATUS, QHeaderView.ResizeMode.Fixed)
 
         self.setColumnWidth(self.COL_CHECK, 48)
+        self.setColumnWidth(self.COL_STATUS, 140)
+        header.setMinimumSectionSize(0)  # Default
+        header.resizeSection(self.COL_DURATION, 75)
+        header.resizeSection(self.COL_FORMAT, 65)
+        header.resizeSection(self.COL_LUFS, 85)
+        header.resizeSection(self.COL_TRUE_PEAK, 85)
+        header.resizeSection(self.COL_BITRATE, 95)
+        header.resizeSection(self.COL_STATUS, 140)
 
         # Comportamento
         self.setAlternatingRowColors(True)

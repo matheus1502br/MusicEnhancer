@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -72,6 +73,15 @@ class AnalysisWorker(QRunnable):
 
             row = self.start_row + i
             try:
+                # Validação prévia do arquivo
+                path = Path(file_path)
+                if not path.exists():
+                    raise FileNotFoundError(f"Arquivo não encontrado: {file_path}")
+                if not path.is_file():
+                    raise ValueError(f"Caminho não é um arquivo: {file_path}")
+                if path.stat().st_size == 0:
+                    raise ValueError(f"Arquivo vazio (0 bytes): {file_path}")
+
                 # Análise de loudness (passagem 1)
                 loudness = self.engine.analyze_loudness(file_path)
 
@@ -84,10 +94,10 @@ class AnalysisWorker(QRunnable):
                 status_text = "Analisado" if not bypass else "Pronto (Bypass)"
 
                 track_data = {
-                    "name": Path(file_path).name,
-                    "path": file_path,
-                    "duration": self._format_duration(info),
-                    "format": info.codec_name or Path(file_path).suffix.lstrip(".").upper(),
+                    "name": path.name,
+                    "path": str(path),
+                    "duration": self._format_duration(info, path),
+                    "format": info.codec_name or path.suffix.lstrip(".").upper(),
                     "lufs": loudness.input_i,
                     "true_peak": loudness.input_tp,
                     "lra": loudness.input_lra,
@@ -100,16 +110,42 @@ class AnalysisWorker(QRunnable):
 
                 self.signals.track_analyzed.emit(row, track_data)
 
+            except FileNotFoundError as e:
+                self.signals.track_failed.emit(row, f"Arquivo não encontrado: {e}")
+            except PermissionError as e:
+                self.signals.track_failed.emit(row, f"Sem permissão de leitura: {e}")
+            except ValueError as e:
+                self.signals.track_failed.emit(row, f"Arquivo inválido: {e}")
+            except RuntimeError as e:
+                self.signals.track_failed.emit(row, f"Erro no FFmpeg: {e}")
             except Exception as e:
-                self.signals.track_failed.emit(row, str(e))
+                # Log detalhado para debug
+                traceback.print_exc()
+                self.signals.track_failed.emit(row, f"Erro inesperado: {type(e).__name__}: {e}")
 
         self.signals.finished.emit()
 
-    def _format_duration(self, info) -> str:
-        # Duração estimada via bitrate e tamanho do arquivo (aproximado)
-        # Para precisão real, precisaríamos do ffprobe -show_entries format=duration
+    def _format_duration(self, info, path: Path) -> str:
+        """Obtém duração real via ffprobe."""
         try:
-            size = Path(info.path).stat().st_size if hasattr(info, 'path') else 0
+            # Tenta obter duração do container via ffprobe
+            result = self.engine._run([
+                str(self.engine.ffprobe_path), "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(path)
+            ], capture_output=True)
+            if result.stdout:
+                seconds = float(result.stdout.strip())
+                mins = int(seconds // 60)
+                secs = int(seconds % 60)
+                return f"{mins}:{secs:02d}"
+        except Exception:
+            pass
+
+        # Fallback: estimativa via bitrate/tamanho
+        try:
+            size = path.stat().st_size
             br = info.bit_rate or 0
             if br > 0 and size > 0:
                 seconds = (size * 8) / br
@@ -160,7 +196,18 @@ class BatchWorker(QRunnable):
             return
 
         output_folder = Path(self.settings["output_folder"])
-        output_folder.mkdir(parents=True, exist_ok=True)
+        try:
+            output_folder.mkdir(parents=True, exist_ok=True)
+            # Testa permissão de escrita
+            test_file = output_folder / ".write_test"
+            test_file.write_text("test")
+            test_file.unlink()
+        except PermissionError as e:
+            self.signals.finished.emit(False, f"Sem permissão de escrita na pasta de saída: {e}")
+            return
+        except Exception as e:
+            self.signals.finished.emit(False, f"Erro ao acessar pasta de saída: {e}")
+            return
 
         manifest_path = output_folder / ".musicenhancer_manifest.json"
         manifest = self._load_manifest(manifest_path)
@@ -175,12 +222,37 @@ class BatchWorker(QRunnable):
 
             track_data = self.main_window.music_table.get_track_data(row)
             if not track_data:
+                error_messages.append(f"Linha {row}: dados da faixa não encontrados")
+                self.signals.track_failed.emit(row, "Dados da faixa não encontrados")
                 continue
 
             source_path = Path(track_data["path"])
             dest_path = output_folder / source_path.name
 
-            # Evita sobrescrever arquivos existentes
+            # Verifica se já foi processado (bypass via manifesto)
+            manifest_key = str(source_path)
+            if manifest_key in manifest.get("entries", {}):
+                existing = manifest["entries"][manifest_key]
+                # Se o arquivo de destino existe e parâmetros são iguais, pula
+                if Path(existing.get("destination", "")).exists():
+                    if (existing.get("target_lufs") == self.settings.get("target_loudness", -14.0) and
+                        existing.get("target_true_peak") == self.settings.get("target_true_peak", -1.0)):
+                        self.signals.track_finished.emit(row, NormalizationResult(
+                            status="bypass",
+                            input_metrics=type('obj', (object,), {
+                                'input_i': existing.get('input_lufs', 0),
+                                'input_tp': existing.get('input_true_peak', 0),
+                                'input_lra': 0,
+                                'input_thresh': 0
+                            })(),
+                            post_validation=None
+                        ))
+                        success_count += 1
+                        overall = int(((idx + 1) / total) * 100)
+                        self.signals.overall_progress.emit(overall)
+                        continue
+
+            # Evita sobrescrever arquivos existentes com nome diferente
             if dest_path.exists():
                 base = dest_path.stem
                 suffix = dest_path.suffix
@@ -198,10 +270,23 @@ class BatchWorker(QRunnable):
                 self.signals.track_finished.emit(row, result)
                 success_count += 1
 
-            except Exception as e:
+            except FileNotFoundError as e:
+                error_msg = f"{source_path.name}: Arquivo de origem não encontrado"
+                error_messages.append(error_msg)
+                self.signals.track_failed.emit(row, error_msg)
+            except PermissionError as e:
+                error_msg = f"{source_path.name}: Sem permissão para ler/escrever"
+                error_messages.append(error_msg)
+                self.signals.track_failed.emit(row, error_msg)
+            except RuntimeError as e:
                 error_msg = f"{source_path.name}: {e}"
                 error_messages.append(error_msg)
                 self.signals.track_failed.emit(row, str(e))
+            except Exception as e:
+                traceback.print_exc()
+                error_msg = f"{source_path.name}: Erro inesperado ({type(e).__name__})"
+                error_messages.append(error_msg)
+                self.signals.track_failed.emit(row, error_msg)
 
             # Progresso geral
             overall = int(((idx + 1) / total) * 100)
@@ -227,13 +312,18 @@ class BatchWorker(QRunnable):
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     return json.load(f)
+            except json.JSONDecodeError:
+                return {"version": 1, "entries": {}}
             except Exception:
-                pass
+                return {"version": 1, "entries": {}}
         return {"version": 1, "entries": {}}
 
     def _save_manifest(self, path: Path, manifest: dict) -> None:
-        with open(path, "w", encoding="utf-8") as f:
+        # Escrita atômica: escreve em temp e renomeia
+        temp_path = path.with_suffix(".tmp")
+        with open(temp_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, ensure_ascii=False, indent=2)
+        temp_path.replace(path)
 
     def _update_manifest(self, manifest: dict, source: Path, dest: Path, result: NormalizationResult) -> None:
         entry = {
@@ -261,6 +351,7 @@ class FolderScanWorker(QRunnable):
         files_found = Signal(list)      # lista de caminhos
         finished = Signal()
         error = Signal(str)
+        cancelled = Signal()
 
     def __init__(self, folder_path: str):
         super().__init__()
@@ -275,17 +366,29 @@ class FolderScanWorker(QRunnable):
     @Slot()
     def run(self) -> None:
         try:
+            if not self.folder_path.exists():
+                self.signals.error.emit(f"Pasta não encontrada: {self.folder_path}")
+                self.signals.finished.emit()
+                return
+            if not self.folder_path.is_dir():
+                self.signals.error.emit(f"Caminho não é uma pasta: {self.folder_path}")
+                self.signals.finished.emit()
+                return
+
             files = []
             for ext in self.SUPPORTED_EXTS:
                 for file_path in self.folder_path.rglob(f"*{ext}"):
                     if self._cancelled:
                         self.signals.cancelled.emit()
                         return
-                    if file_path.is_file():
+                    if file_path.is_file() and file_path.stat().st_size > 0:
                         files.append(str(file_path))
             self.signals.files_found.emit(files)
+        except PermissionError as e:
+            self.signals.error.emit(f"Sem permissão para acessar a pasta: {e}")
         except Exception as e:
-            self.signals.error.emit(str(e))
+            traceback.print_exc()
+            self.signals.error.emit(f"Erro ao escanear: {type(e).__name__}: {e}")
         finally:
             self.signals.finished.emit()
 
@@ -335,4 +438,4 @@ class WorkerManager:
     @classmethod
     def cancel_all(cls) -> None:
         cls.pool().clear()
-        cls.pool().waitForDone()
+        cls.pool().waitForDone(3000)  # Aguarda até 3s para finalizar
