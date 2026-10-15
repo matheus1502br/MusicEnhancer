@@ -36,7 +36,7 @@ class BatchSignals(QObject):
     track_progress = Signal(int, int)       # row_index, progress_percent
     track_finished = Signal(int, NormalizationResult)  # row_index, result
     track_failed = Signal(int, str)         # row_index, error_message
-    overall_progress = Signal(int)          # 0-100
+    overall_progress = Signal(int, int)     # current, total
     finished = Signal(bool, str)            # success, message
     cancelled = Signal()
 
@@ -215,6 +215,10 @@ class BatchWorker(QRunnable):
         success_count = 0
         error_messages = []
 
+        # Obtém preferências de sobrescrita
+        overwrite_choice = self.settings.get("overwrite_choice", "rename")
+        overwrite_apply_all = self.settings.get("overwrite_apply_all", False)
+
         for idx, row in enumerate(self.selected_rows):
             if self._cancelled:
                 self.signals.cancelled.emit()
@@ -248,18 +252,32 @@ class BatchWorker(QRunnable):
                             post_validation=None
                         ))
                         success_count += 1
-                        overall = int(((idx + 1) / total) * 100)
-                        self.signals.overall_progress.emit(overall)
+                        self.signals.overall_progress.emit(idx + 1, total)
                         continue
 
-            # Evita sobrescrever arquivos existentes com nome diferente
+            # Trata arquivos existentes baseado na escolha do usuário
             if dest_path.exists():
-                base = dest_path.stem
-                suffix = dest_path.suffix
-                counter = 1
-                while dest_path.exists():
-                    dest_path = output_folder / f"{base}_{counter}{suffix}"
-                    counter += 1
+                if overwrite_choice == "skip":
+                    # Pula este arquivo
+                    self.signals.track_finished.emit(row, NormalizationResult(
+                        status="skipped",
+                        input_metrics=type('obj', (object,), {
+                            'input_i': 0, 'input_tp': 0, 'input_lra': 0, 'input_thresh': 0
+                        })(),
+                        post_validation=None
+                    ))
+                    success_count += 1
+                    self.signals.overall_progress.emit(idx + 1, total)
+                    continue
+                elif overwrite_choice == "rename":
+                    # Renomeia com sufixo numérico
+                    base = dest_path.stem
+                    suffix = dest_path.suffix
+                    counter = 1
+                    while dest_path.exists():
+                        dest_path = output_folder / f"{base}_{counter}{suffix}"
+                        counter += 1
+                # Se overwrite_choice == "replace", sobrescreve (comportamento padrão)
 
             self.signals.track_started.emit(row)
 
@@ -289,8 +307,7 @@ class BatchWorker(QRunnable):
                 self.signals.track_failed.emit(row, error_msg)
 
             # Progresso geral
-            overall = int(((idx + 1) / total) * 100)
-            self.signals.overall_progress.emit(overall)
+            self.signals.overall_progress.emit(idx + 1, total)
 
         # Salva manifesto
         try:

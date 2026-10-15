@@ -107,7 +107,6 @@ QHeaderView::section:last {
    mas garantimos fallback visual aqui */
 QTableWidgetItem[numeric="true"] {
     text-align: right;
-    font-variant-numeric: tabular-nums;
     font-family: "Segoe UI Variable", "JetBrains Mono", "Consolas", monospace;
 }
 
@@ -255,7 +254,6 @@ QDoubleSpinBox, QSpinBox {
     border-radius: 6px;
     padding: 6px 10px;
     padding-right: 28px;
-    font-variant-numeric: tabular-nums;
     font-family: "Segoe UI Variable", "JetBrains Mono", "Consolas", monospace;
 }
 QDoubleSpinBox:hover, QSpinBox:hover {
@@ -323,7 +321,6 @@ QProgressBar {
     text-align: center;
     color: #FAFAFA;
     font-weight: 600;
-    font-variant-numeric: tabular-nums;
     height: 22px;
 }
 QProgressBar::chunk {
@@ -376,7 +373,6 @@ QLabel[subheading="true"] {
 }
 QLabel[metric="true"] {
     font-family: "Segoe UI Variable", "JetBrains Mono", "Consolas", monospace;
-    font-variant-numeric: tabular-nums;
     font-size: 14px;
     font-weight: 600;
 }

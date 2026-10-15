@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, QMimeData, QModelIndex, QRect
+from PySide6.QtCore import Qt, QMimeData, QModelIndex, QRect, QSize
 from PySide6.QtGui import (
     QDragEnterEvent,
     QDropEvent,
@@ -13,6 +13,9 @@ from PySide6.QtGui import (
     QFontDatabase,
     QColor,
     QBrush,
+    QPainter,
+    QPixmap,
+    QIcon,
 )
 from PySide6.QtWidgets import (
     QTableWidget,
@@ -25,16 +28,20 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QCheckBox,
     QLabel,
+    QVBoxLayout,
+    QSizePolicy,
 )
 
 if TYPE_CHECKING:
     from .main_window import MainWindow
 
+from .constants import UIStrings, SUPPORTED_AUDIO_EXTS, FORMAT_DISPLAY_NAME
+
 
 class TabularNumericDelegate(QStyledItemDelegate):
     """Delegate que força alinhamento à direita e numeração tabular para colunas numéricas."""
 
-    NUMERIC_COLUMNS = {2, 4, 5, 6}  # Duração, LUFS, True Peak, Bitrate (índices 0-based)
+    NUMERIC_COLUMNS = {2, 4, 5, 6}  # Duração, LUFS, Pico Real, Taxa de Bits (índices 0-based)
 
     def initStyleOption(self, option: QStyleOptionViewItem, index: QModelIndex) -> None:
         super().initStyleOption(option, index)
@@ -60,7 +67,7 @@ class TabularNumericDelegate(QStyledItemDelegate):
                     option.palette.setColor(option.palette.ColorRole.Text, QColor("#FAFAFA"))
             except (ValueError, TypeError):
                 pass
-        elif index.column() == 5:  # True Peak
+        elif index.column() == 5:  # Pico Real
             try:
                 value = float(index.data(Qt.ItemDataRole.DisplayRole) or "0")
                 if value > -1.0:
@@ -108,10 +115,56 @@ class CheckBoxHeader(QHeaderView):
             self.style().drawControl(QStyle.ControlElement.CE_CheckBox, opt, painter, self)
 
 
+class EmptyStateWidget(QWidget):
+    """Widget de estado vazio exibido quando a tabela não tem linhas."""
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setObjectName("emptyStateWidget")
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setSpacing(16)
+
+        # Ícone (SVG inline como QLabel com pixmap)
+        icon_label = QLabel()
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # SVG simples de música/arquivo
+        icon_svg = """
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 3L2 7V17L12 21L22 17V7L12 3Z" stroke="#52525B" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M12 3V21" stroke="#52525B" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M5 12H19" stroke="#52525B" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        """
+        pixmap = QPixmap(64, 64)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        from PySide6.QtSvg import QSvgRenderer
+        from PySide6.QtCore import QByteArray
+        renderer = QSvgRenderer(QByteArray(icon_svg.encode('utf-8')))
+        renderer.render(painter)
+        painter.end()
+        icon_label.setPixmap(pixmap)
+        layout.addWidget(icon_label)
+
+        # Título
+        title = QLabel(UIStrings.EMPTY_STATE_TITLE)
+        title.setProperty("heading", True)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+
+        # Mensagem
+        message = QLabel(UIStrings.EMPTY_STATE_MESSAGE)
+        message.setProperty("muted", True)
+        message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        message.setWordWrap(True)
+        layout.addWidget(message)
+
+
 class MusicTableWidget(QTableWidget):
     """Tabela de músicas com Drag & Drop, numeração tabular e badges de status."""
-
-    SUPPORTED_EXTS = {".mp3", ".flac", ".wav", ".m4a", ".aac"}
 
     # Índices das colunas
     COL_CHECK = 0
@@ -125,27 +178,25 @@ class MusicTableWidget(QTableWidget):
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
+        self._empty_state_widget = EmptyStateWidget(self)
+        self._empty_state_widget.hide()
         self._setup_table()
         self._setup_drag_drop()
         self._setup_delegate()
+        self._update_empty_state_visibility()
 
     def _setup_table(self) -> None:
         # Configuração básica
         self.setColumnCount(8)
-        self.setHorizontalHeaderLabels([
-            "",           # Checkbox
-            "Nome da Faixa",
-            "Duração",
-            "Formato",
-            "LUFS Atual",
-            "True Peak",
-            "Bitrate",
-            "Status",
-        ])
+        self.setHorizontalHeaderLabels(UIStrings.TABLE_HEADERS)
 
         # Header customizado com checkbox na coluna 0
         self._custom_header = CheckBoxHeader(Qt.Orientation.Horizontal, self)
         self.setHorizontalHeader(self._custom_header)
+
+        # Tooltips nos cabeçalhos
+        for col, tooltip in UIStrings.TABLE_HEADER_TOOLTIPS.items():
+            self.horizontalHeader().setToolTip(tooltip)
 
         header = self.horizontalHeader()
         header.setStretchLastSection(False)
@@ -160,7 +211,7 @@ class MusicTableWidget(QTableWidget):
 
         self.setColumnWidth(self.COL_CHECK, 48)
         self.setColumnWidth(self.COL_STATUS, 140)
-        header.setMinimumSectionSize(0)  # Default
+        header.setMinimumSectionSize(0)
         header.resizeSection(self.COL_DURATION, 75)
         header.resizeSection(self.COL_FORMAT, 65)
         header.resizeSection(self.COL_LUFS, 85)
@@ -184,6 +235,13 @@ class MusicTableWidget(QTableWidget):
             font = QFont("Segoe UI", 13)
         self.setFont(font)
 
+        # Conecta sinal de redimensionamento para persistir estado
+        header.sectionResized.connect(self._on_header_resized)
+
+    def _on_header_resized(self, logical_index: int, old_size: int, new_size: int) -> None:
+        # O estado será salvo via QSettings no MainWindow
+        pass
+
     def _setup_drag_drop(self) -> None:
         self.setAcceptDrops(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DropOnly)
@@ -192,6 +250,18 @@ class MusicTableWidget(QTableWidget):
     def _setup_delegate(self) -> None:
         self.setItemDelegate(TabularNumericDelegate(self))
 
+    def _update_empty_state_visibility(self) -> None:
+        """Mostra/oculta o widget de estado vazio baseado no número de linhas."""
+        is_empty = self.rowCount() == 0
+        self._empty_state_widget.setVisible(is_empty)
+        if is_empty:
+            self._empty_state_widget.resize(self.viewport().size())
+            self._empty_state_widget.raise_()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._empty_state_widget.resize(self.viewport().size())
+
     # ------------------------------------------------------------------
     # Drag & Drop
     # ------------------------------------------------------------------
@@ -199,7 +269,7 @@ class MusicTableWidget(QTableWidget):
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
             valid = any(
-                url.isLocalFile() and Path(url.toLocalFile()).suffix.lower() in self.SUPPORTED_EXTS
+                url.isLocalFile() and Path(url.toLocalFile()).suffix.lower() in SUPPORTED_AUDIO_EXTS
                 for url in urls
             )
             if valid:
@@ -229,7 +299,7 @@ class MusicTableWidget(QTableWidget):
         for url in event.mimeData().urls():
             if url.isLocalFile():
                 path = Path(url.toLocalFile())
-                if path.suffix.lower() in self.SUPPORTED_EXTS:
+                if path.suffix.lower() in SUPPORTED_AUDIO_EXTS:
                     files.append(str(path))
 
         if files:
@@ -245,6 +315,7 @@ class MusicTableWidget(QTableWidget):
         """Adiciona uma faixa à tabela. Retorna o índice da linha."""
         row = self.rowCount()
         self.insertRow(row)
+        self._update_empty_state_visibility()
 
         # Coluna 0: Checkbox
         chk_widget = QWidget()
@@ -279,13 +350,13 @@ class MusicTableWidget(QTableWidget):
         lufs_item.setData(Qt.ItemDataRole.UserRole, track_data.get("lufs", 0))
         self.setItem(row, self.COL_LUFS, lufs_item)
 
-        # Coluna 5: True Peak
+        # Coluna 5: Pico Real (dBTP)
         tp_item = QTableWidgetItem(f"{track_data.get('true_peak', 0):.1f}")
         tp_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         tp_item.setData(Qt.ItemDataRole.UserRole, track_data.get("true_peak", 0))
         self.setItem(row, self.COL_TRUE_PEAK, tp_item)
 
-        # Coluna 6: Bitrate
+        # Coluna 6: Taxa de Bits
         br_item = QTableWidgetItem(track_data.get("bitrate", "—"))
         br_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.setItem(row, self.COL_BITRATE, br_item)
@@ -295,13 +366,27 @@ class MusicTableWidget(QTableWidget):
         status_layout = QHBoxLayout(status_widget)
         status_layout.setContentsMargins(8, 4, 8, 4)
         status_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        badge = QLabel(track_data.get("status", "Pendente"))
+        status_key = track_data.get("status_key", "pending")
+        status_text = track_data.get("status", UIStrings.STATUS_TEXT.get(status_key, "Pendente"))
+        badge = QLabel(status_text)
         badge.setProperty("badge", True)
-        badge.setProperty("status", track_data.get("status_key", "pending"))
+        badge.setProperty("status", status_key)
+        badge.setToolTip(UIStrings.STATUS_TOOLTIPS.get(status_key, ""))
         status_layout.addWidget(badge)
         self.setCellWidget(row, self.COL_STATUS, status_widget)
 
         return row
+
+    def remove_selected_rows(self) -> int:
+        """Remove todas as linhas selecionadas. Retorna a quantidade removida."""
+        selected_rows = self.get_selected_rows()
+        # Remove de trás para frente para não alterar índices
+        for row in sorted(selected_rows, reverse=True):
+            self.removeRow(row)
+        self._update_empty_state_visibility()
+        self._custom_header._checked = False
+        self._custom_header.updateSection(0)
+        return len(selected_rows)
 
     def set_all_rows_checked(self, checked: bool) -> None:
         for row in range(self.rowCount()):
@@ -312,6 +397,7 @@ class MusicTableWidget(QTableWidget):
                     checkbox.blockSignals(True)
                     checkbox.setChecked(checked)
                     checkbox.blockSignals(False)
+        self._custom_header._checked = checked
 
     def get_selected_rows(self) -> list[int]:
         """Retorna índices das linhas com checkbox marcado."""
@@ -366,7 +452,9 @@ class MusicTableWidget(QTableWidget):
             badge = widget.findChild(QLabel)
             if badge:
                 badge.setProperty("status", status_key)
-                badge.setText(status_text or status_key.replace("_", " ").title())
+                display_text = status_text or UIStrings.STATUS_TEXT.get(status_key, status_key.replace("_", " ").title())
+                badge.setText(display_text)
+                badge.setToolTip(UIStrings.STATUS_TOOLTIPS.get(status_key, ""))
                 badge.style().unpolish(badge)
                 badge.style().polish(badge)
 
@@ -378,7 +466,7 @@ class MusicTableWidget(QTableWidget):
                 self.row_selection_changed.emit(row, bool(state))
 
     # ------------------------------------------------------------------
-    # Sinais personalizados (usando property para evitar import circular)
+    # Sinais personalizados
     # ------------------------------------------------------------------
     from PySide6.QtCore import Signal
     files_dropped = Signal(list)
@@ -393,44 +481,44 @@ MOCK_TRACKS = [
         "name": "Midnight Drive.mp3",
         "path": "/Music/Electronic/Midnight Drive.mp3",
         "duration": "3:42",
-        "format": "mp3",
+        "format": "MP3",
         "lufs": -16.2,
         "true_peak": -1.8,
         "bitrate": "320 kbps",
-        "status": "Analisado",
+        "status": UIStrings.STATUS_TEXT["analyzed"],
         "status_key": "analyzed",
     },
     {
         "name": "Neon Dreams.flac",
         "path": "/Music/Synthwave/Neon Dreams.flac",
         "duration": "4:18",
-        "format": "flac",
+        "format": "FLAC",
         "lufs": -11.5,
         "true_peak": -0.3,
         "bitrate": "1411 kbps",
-        "status": "Alerta Peak",
+        "status": UIStrings.STATUS_TEXT["peak_warn"],
         "status_key": "peak_warn",
     },
     {
         "name": "Analog Heartbeat.wav",
         "path": "/Music/Ambient/Analog Heartbeat.wav",
         "duration": "5:03",
-        "format": "wav",
+        "format": "WAV",
         "lufs": -19.8,
         "true_peak": -2.4,
         "bitrate": "2116 kbps",
-        "status": "Concluído",
+        "status": UIStrings.STATUS_TEXT["completed"],
         "status_key": "completed",
     },
     {
         "name": "Digital Rain.m4a",
         "path": "/Music/Chill/Digital Rain.m4a",
         "duration": "2:56",
-        "format": "m4a",
+        "format": "M4A",
         "lufs": -13.7,
         "true_peak": -0.8,
         "bitrate": "256 kbps",
-        "status": "Pendente",
+        "status": UIStrings.STATUS_TEXT["pending"],
         "status_key": "pending",
     },
 ]

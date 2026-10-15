@@ -12,8 +12,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFontDatabase, QIcon
+from PySide6.QtGui import QFontDatabase
 
 from ui.main_window import MainWindow
 from ui.styles import get_stylesheet
@@ -21,13 +20,7 @@ from ui.styles import get_stylesheet
 
 def setup_application() -> QApplication:
     """Configura e retorna a instância do QApplication."""
-    # High DPI support
-    QApplication.setHighDpiScaleFactorRoundingPolicy(
-        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
-    )
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling)
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps)
-
+    # Qt6 gerencia High DPI nativamente — não requer atributos AA_EnableHighDpiScaling
     app = QApplication(sys.argv)
     app.setApplicationName("MusicEnhancer")
     app.setApplicationVersion("0.3.0")

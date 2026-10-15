@@ -12,11 +12,12 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QComboBox,
     QDoubleSpinBox,
-    QPushButton,
     QFrame,
     QSizePolicy,
     QSpacerItem,
 )
+
+from .constants import UIStrings
 
 
 class InspectorPanel(QWidget):
@@ -37,35 +38,35 @@ class InspectorPanel(QWidget):
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(20)
+        layout.setSpacing(12)
 
         # --------------------------------------------------------------
         # Cabeçalho: "Faixa Selecionada"
         # --------------------------------------------------------------
-        header = QLabel("Faixa Selecionada")
+        header = QLabel(UIStrings.INSPECTOR_TITLE)
         header.setProperty("heading", True)
         layout.addWidget(header)
 
         # --------------------------------------------------------------
         # Grid de Métricas Lidas
         # --------------------------------------------------------------
-        metrics_group = QGroupBox("Métricas Analisadas")
+        metrics_group = QGroupBox(UIStrings.INSPECTOR_METRICS_GROUP)
         metrics_layout = QGridLayout(metrics_group)
-        metrics_layout.setContentsMargins(20, 28, 20, 20)
-        metrics_layout.setHorizontalSpacing(28)
-        metrics_layout.setVerticalSpacing(14)
+        metrics_layout.setContentsMargins(16, 20, 16, 16)
+        metrics_layout.setHorizontalSpacing(24)
+        metrics_layout.setVerticalSpacing(10)
 
-        # Labels de métricas (chave -> (label texto, valor inicial))
+        # Labels de métricas
         self._metric_labels = {}
         metrics_def = [
-            ("lufs", "Loudness Integrado (LUFS)", "—"),
-            ("true_peak", "True Peak (dBTP)", "—"),
-            ("lra", "LRA (LU)", "—"),
-            ("duration", "Duração", "—"),
-            ("sample_rate", "Taxa de Amostragem", "—"),
-            ("bit_depth", "Profundidade de Bits", "—"),
-            ("bitrate", "Bitrate", "—"),
-            ("format", "Formato", "—"),
+            ("lufs", UIStrings.INSPECTOR_METRICS["lufs"], "—"),
+            ("true_peak", UIStrings.INSPECTOR_METRICS["true_peak"], "—"),
+            ("lra", UIStrings.INSPECTOR_METRICS["lra"], "—"),
+            ("duration", UIStrings.INSPECTOR_METRICS["duration"], "—"),
+            ("sample_rate", UIStrings.INSPECTOR_METRICS["sample_rate"], "—"),
+            ("bit_depth", UIStrings.INSPECTOR_METRICS["bit_depth"], "—"),
+            ("bitrate", UIStrings.INSPECTOR_METRICS["bitrate"], "—"),
+            ("format", UIStrings.INSPECTOR_METRICS["format"], "—"),
         ]
 
         for i, (key, label_text, default) in enumerate(metrics_def):
@@ -75,6 +76,7 @@ class InspectorPanel(QWidget):
             lbl = QLabel(label_text)
             lbl.setProperty("subheading", True)
             lbl.setWordWrap(True)
+            lbl.setToolTip(UIStrings.INSPECTOR_METRIC_TOOLTIPS.get(key, ""))
             metrics_layout.addWidget(lbl, row, col)
 
             val = QLabel(default)
@@ -101,83 +103,82 @@ class InspectorPanel(QWidget):
         # --------------------------------------------------------------
         # Configuração de Normalização
         # --------------------------------------------------------------
-        config_group = QGroupBox("Configuração de Normalização")
+        config_group = QGroupBox(UIStrings.INSPECTOR_CONFIG_GROUP)
         config_layout = QVBoxLayout(config_group)
-        config_layout.setContentsMargins(20, 28, 20, 20)
-        config_layout.setSpacing(18)
+        config_layout.setContentsMargins(16, 20, 16, 16)
+        config_layout.setSpacing(12)
 
         # Preset Selector
         preset_layout = QHBoxLayout()
         preset_layout.setSpacing(16)
-        preset_lbl = QLabel("Preset")
+        preset_lbl = QLabel(UIStrings.INSPECTOR_PRESET_LABEL)
         preset_lbl.setProperty("subheading", True)
         preset_lbl.setFixedWidth(70)
+        preset_lbl.setToolTip(UIStrings.INSPECTOR_PRESET_TOOLTIP)
         preset_layout.addWidget(preset_lbl)
 
         self.preset_combo = QComboBox()
-        self.preset_combo.addItems([
-            "Streaming (-14 LUFS, -1.0 dBTP)",
-            "Carro / Festa (-11 LUFS, -1.0 dBTP)",
-            "Preservado / Arquivo (-18 LUFS, -1.5 dBTP)",
-            "Personalizado…",
-        ])
+        self.preset_combo.addItems(UIStrings.INSPECTOR_PRESETS)
         self.preset_combo.setCurrentIndex(0)
-        self.preset_combo.setToolTip("Selecione um preset de loudness alvo")
+        self.preset_combo.setToolTip(UIStrings.INSPECTOR_PRESET_TOOLTIP)
         preset_layout.addWidget(self.preset_combo, 1)
         config_layout.addLayout(preset_layout)
 
         # Painel Avançado Expansível
-        self.advanced_group = QGroupBox("Ajustes Avançados")
+        self.advanced_group = QGroupBox(UIStrings.INSPECTOR_ADVANCED_GROUP)
         self.advanced_group.setCheckable(True)
         self.advanced_group.setChecked(False)
         adv_layout = QGridLayout(self.advanced_group)
-        adv_layout.setContentsMargins(20, 28, 20, 20)
-        adv_layout.setHorizontalSpacing(28)
-        adv_layout.setVerticalSpacing(18)
+        adv_layout.setContentsMargins(16, 20, 16, 16)
+        adv_layout.setHorizontalSpacing(24)
+        adv_layout.setVerticalSpacing(12)
 
         # Loudness Alvo
-        loud_lbl = QLabel("Loudness Alvo (LUFS)")
+        loud_lbl = QLabel(UIStrings.INSPECTOR_LOUDNESS_LABEL)
         loud_lbl.setProperty("subheading", True)
+        loud_lbl.setToolTip(UIStrings.INSPECTOR_LOUDNESS_TOOLTIP)
         adv_layout.addWidget(loud_lbl, 0, 0)
 
         self.target_loudness = QDoubleSpinBox()
-        self.target_loudness.setRange(-24.0, -9.0)
-        self.target_loudness.setSingleStep(0.5)
+        self.target_loudness.setRange(UIStrings.INSPECTOR_LOUDNESS_MIN, UIStrings.INSPECTOR_LOUDNESS_MAX)
+        self.target_loudness.setSingleStep(UIStrings.INSPECTOR_LOUDNESS_STEP)
         self.target_loudness.setDecimals(1)
-        self.target_loudness.setValue(-14.0)
+        self.target_loudness.setValue(UIStrings.INSPECTOR_LOUDNESS_DEFAULT)
         self.target_loudness.setSuffix(" LUFS")
-        self.target_loudness.setToolTip("Loudness integrado alvo segundo EBU R128")
+        self.target_loudness.setToolTip(UIStrings.INSPECTOR_LOUDNESS_TOOLTIP)
         self.target_loudness.setMinimumWidth(140)
         adv_layout.addWidget(self.target_loudness, 0, 1)
 
         # True Peak Alvo
-        tp_lbl = QLabel("Pico Máximo True Peak (dBTP)")
+        tp_lbl = QLabel(UIStrings.INSPECTOR_TRUE_PEAK_LABEL)
         tp_lbl.setProperty("subheading", True)
+        tp_lbl.setToolTip(UIStrings.INSPECTOR_TRUE_PEAK_TOOLTIP)
         adv_layout.addWidget(tp_lbl, 1, 0)
 
         self.target_true_peak = QDoubleSpinBox()
-        self.target_true_peak.setRange(-3.0, -0.5)
-        self.target_true_peak.setSingleStep(0.1)
+        self.target_true_peak.setRange(UIStrings.INSPECTOR_TRUE_PEAK_MIN, UIStrings.INSPECTOR_TRUE_PEAK_MAX)
+        self.target_true_peak.setSingleStep(UIStrings.INSPECTOR_TRUE_PEAK_STEP)
         self.target_true_peak.setDecimals(1)
-        self.target_true_peak.setValue(-1.0)
+        self.target_true_peak.setValue(UIStrings.INSPECTOR_TRUE_PEAK_DEFAULT)
         self.target_true_peak.setSuffix(" dBTP")
-        self.target_true_peak.setToolTip("Limite de True Peak para evitar clipping em conversão lossy")
+        self.target_true_peak.setToolTip(UIStrings.INSPECTOR_TRUE_PEAK_TOOLTIP)
         self.target_true_peak.setMinimumWidth(140)
         adv_layout.addWidget(self.target_true_peak, 1, 1)
 
         # LRA Alvo (opcional, apenas exibição informativa)
-        lra_lbl = QLabel("LRA Alvo (LU)")
+        lra_lbl = QLabel(UIStrings.INSPECTOR_LRA_LABEL)
         lra_lbl.setProperty("subheading", True)
+        lra_lbl.setToolTip(UIStrings.INSPECTOR_LRA_TOOLTIP)
         adv_layout.addWidget(lra_lbl, 2, 0)
 
         self.target_lra = QDoubleSpinBox()
         self.target_lra.setRange(1.0, 20.0)
         self.target_lra.setSingleStep(1.0)
         self.target_lra.setDecimals(1)
-        self.target_lra.setValue(11.0)
+        self.target_lra.setValue(UIStrings.INSPECTOR_LRA_DEFAULT)
         self.target_lra.setSuffix(" LU")
         self.target_lra.setEnabled(False)  # Fixado em 11 LU por enquanto
-        self.target_lra.setToolTip("Loudness Range alvo (fixo em 11 LU para loudnorm linear)")
+        self.target_lra.setToolTip(UIStrings.INSPECTOR_LRA_TOOLTIP)
         self.target_lra.setMinimumWidth(140)
         adv_layout.addWidget(self.target_lra, 2, 1)
 
@@ -189,7 +190,7 @@ class InspectorPanel(QWidget):
         # --------------------------------------------------------------
         # Espaçador final
         # --------------------------------------------------------------
-        layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
+        layout.addSpacerItem(QSpacerItem(20, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
 
     def _connect_signals(self) -> None:
         self.preset_combo.currentTextChanged.connect(self._on_preset_changed)
@@ -200,9 +201,9 @@ class InspectorPanel(QWidget):
     def _on_preset_changed(self, text: str) -> None:
         """Atualiza spinboxes conforme preset selecionado."""
         presets = {
-            "Streaming (-14 LUFS, -1.0 dBTP)": (-14.0, -1.0),
-            "Carro / Festa (-11 LUFS, -1.0 dBTP)": (-11.0, -1.0),
-            "Preservado / Arquivo (-18 LUFS, -1.5 dBTP)": (-18.0, -1.5),
+            UIStrings.INSPECTOR_PRESETS[0]: (UIStrings.TARGET_LOUDNESS_STREAMING, UIStrings.TARGET_TRUE_PEAK_DEFAULT),
+            UIStrings.INSPECTOR_PRESETS[1]: (UIStrings.TARGET_LOUDNESS_CAR, UIStrings.TARGET_TRUE_PEAK_CAR),
+            UIStrings.INSPECTOR_PRESETS[2]: (UIStrings.TARGET_LOUDNESS_ARCHIVE, UIStrings.TARGET_TRUE_PEAK_ARCHIVE),
         }
         if text in presets:
             loud, tp = presets[text]
@@ -266,3 +267,11 @@ class InspectorPanel(QWidget):
             "target_lra": self.target_lra.value(),
             "advanced_expanded": self.advanced_group.isChecked(),
         }
+
+    def set_preset(self, preset_text: str) -> None:
+        """Define o preset programaticamente (para sincronizar com toolbar)."""
+        self.preset_combo.blockSignals(True)
+        index = self.preset_combo.findText(preset_text)
+        if index >= 0:
+            self.preset_combo.setCurrentIndex(index)
+        self.preset_combo.blockSignals(False)
