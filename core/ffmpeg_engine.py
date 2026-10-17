@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -57,6 +60,7 @@ class FFmpegEngine:
         )
 
     def _run(self, command: list[str], *, capture_output: bool = True) -> subprocess.CompletedProcess[str]:
+        logger.debug("Executando subprocesso: %s", " ".join(command))
         try:
             return subprocess.run(
                 command, check=True, text=True, encoding="utf-8", errors="replace",
@@ -64,6 +68,7 @@ class FFmpegEngine:
             )
         except subprocess.CalledProcessError as exc:
             details = (exc.stderr or exc.stdout or "sem saída do processo").strip()
+            logger.error("Falha no subprocesso (código %d): %s", exc.returncode, details)
             raise RuntimeError(f"FFmpeg falhou (código {exc.returncode}): {details}") from exc
 
     def probe(self, file_path: str | Path) -> dict[str, Any]:
@@ -115,13 +120,25 @@ class FFmpegEngine:
         if bit_rate is None or bit_rate <= 0:
             return "256k"
         kbps = round(bit_rate / 1000)
-        # Bitrates de VBR reportados de maneira anômala usam o padrão seguro.
-        if kbps < 32 or kbps > 1000:
+        # Fontes sem perdas ou bitrates muito altos (>1000 kbps, como FLAC/WAV) usam qualidade máxima (320k)
+        if kbps > 1000:
+            return "320k"
+        # Bitrates muito baixos ou anômalos usam padrão seguro
+        if kbps < 32:
             return "256k"
         return f"{max(192, min(320, kbps))}k"
 
-    def normalize(self, source: str | Path, destination: str | Path) -> NormalizationResult:
+    def normalize(
+        self,
+        source: str | Path,
+        destination: str | Path,
+        *,
+        target_i: float | None = None,
+        target_tp: float | None = None,
+        target_lra: float | None = None,
+    ) -> NormalizationResult:
         """Executa bypass ou loudnorm e reinscreve metadados com Mutagen."""
+        import logging
         from .audio_analyzer import AudioAnalyzer
         from .metadata_handler import MetadataHandler
 
@@ -129,20 +146,43 @@ class FFmpegEngine:
         if source_path.resolve() == output_path.resolve():
             raise ValueError("A saída deve ser diferente do arquivo de origem.")
         output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        target_i_val = self.TARGET_I if target_i is None else target_i
+        target_tp_val = self.TARGET_TP if target_tp is None else target_tp
+        target_lra_val = self.TARGET_LRA if target_lra is None else target_lra
+
         metrics = self.analyze_loudness(source_path)
         analyzer = AudioAnalyzer(self)
         source_info = analyzer.inspect(source_path)
-        bypass = -14.5 <= metrics.input_i <= -13.5 and metrics.input_tp <= -1.0
+
+        logger.info(
+            "Métricas de origem (%s): I=%.2f LUFS, TP=%.2f dBTP, LRA=%.2f LU | Alvo: I=%.1f LUFS, TP=%.1f dBTP",
+            source_path.name, metrics.input_i, metrics.input_tp, metrics.input_lra, target_i_val, target_tp_val,
+        )
+
+        # Bypass só é válido se a extensão/contêiner de destino for idêntica à de origem
+        same_container = source_path.suffix.lower() == output_path.suffix.lower()
+        bypass = (
+            same_container
+            and (target_i_val - 0.5 <= metrics.input_i <= target_i_val + 0.5)
+            and (metrics.input_tp <= target_tp_val)
+        )
 
         if bypass:
+            logger.info("Faixa dentro do alvo. Aplicando bypass sem re-encode: %s -> %s", source_path.name, output_path.name)
             command = [str(self.ffmpeg_path), "-y", "-i", str(source_path), "-map", "0", "-c", "copy", str(output_path)]
             self._run(command)
             # FFmpeg já transfere metadata na cópia, mas Mutagen garante tags/capas.
-            MetadataHandler.copy_all(source_path, output_path)
+            try:
+                MetadataHandler.copy_all(source_path, output_path)
+            except Exception as meta_exc:
+                logger.warning("Falha não-crítica ao copiar metadados em bypass (%s): %s", source_path.name, meta_exc)
             return NormalizationResult("bypass", metrics, None)
 
+        logger.info("Aplicando normalização linear EBU R128 em 2 passos: %s -> %s", source_path.name, output_path.name)
+
         filter_value = (
-            f"loudnorm=I={self.TARGET_I:.1f}:TP={self.TARGET_TP:.1f}:LRA={self.TARGET_LRA}:"
+            f"loudnorm=I={target_i_val:.1f}:TP={target_tp_val:.1f}:LRA={target_lra_val}:"
             f"measured_I={metrics.input_i:.6f}:measured_TP={metrics.input_tp:.6f}:"
             f"measured_LRA={metrics.input_lra:.6f}:measured_thresh={metrics.input_thresh:.6f}:linear=true"
         )
@@ -165,6 +205,11 @@ class FFmpegEngine:
             command += ["-ar", str(source_info.sample_rate)]
         command.append(str(output_path))
         self._run(command)
-        MetadataHandler.copy_all(source_path, output_path)
+
+        try:
+            MetadataHandler.copy_all(source_path, output_path)
+        except Exception as meta_exc:
+            logging.warning("Falha não-crítica ao copiar metadados (%s): %s", source_path.name, meta_exc)
+
         validation = analyzer.validate_lossless_export(source_path, output_path) if self._is_lossless(source_path) else None
         return NormalizationResult("normalized", metrics, validation)

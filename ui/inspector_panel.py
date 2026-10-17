@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QSpacerItem,
 )
 
-from .constants import UIStrings
+from .constants import UIStrings, Defaults
 
 
 class InspectorPanel(QWidget):
@@ -201,9 +201,9 @@ class InspectorPanel(QWidget):
     def _on_preset_changed(self, text: str) -> None:
         """Atualiza spinboxes conforme preset selecionado."""
         presets = {
-            UIStrings.INSPECTOR_PRESETS[0]: (UIStrings.TARGET_LOUDNESS_STREAMING, UIStrings.TARGET_TRUE_PEAK_DEFAULT),
-            UIStrings.INSPECTOR_PRESETS[1]: (UIStrings.TARGET_LOUDNESS_CAR, UIStrings.TARGET_TRUE_PEAK_CAR),
-            UIStrings.INSPECTOR_PRESETS[2]: (UIStrings.TARGET_LOUDNESS_ARCHIVE, UIStrings.TARGET_TRUE_PEAK_ARCHIVE),
+            UIStrings.INSPECTOR_PRESETS[0]: (Defaults.TARGET_LOUDNESS_STREAMING, Defaults.TARGET_TRUE_PEAK_DEFAULT),
+            UIStrings.INSPECTOR_PRESETS[1]: (Defaults.TARGET_LOUDNESS_CAR, Defaults.TARGET_TRUE_PEAK_CAR),
+            UIStrings.INSPECTOR_PRESETS[2]: (Defaults.TARGET_LOUDNESS_ARCHIVE, Defaults.TARGET_TRUE_PEAK_ARCHIVE),
         }
         if text in presets:
             loud, tp = presets[text]

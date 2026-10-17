@@ -164,3 +164,58 @@ class TestFFmpegEngineNormalize:
         assert "loudnorm" in " ".join(called_cmd)
         assert "libmp3lame" in called_cmd
         assert "320k" in called_cmd  # bitrate clamp max 320k
+
+    def test_normalize_custom_target_i_and_tp(self, tmp_path: Path) -> None:
+        engine = FFmpegEngine.__new__(FFmpegEngine)
+        engine.ffmpeg_path = Path("ffmpeg")
+        engine.ffprobe_path = Path("ffprobe")
+
+        source = tmp_path / "src.mp3"
+        dest = tmp_path / "dst.mp3"
+        source.write_bytes(b"ID3")
+
+        metrics = LoudnessMetrics(input_i=-18.0, input_tp=-2.5, input_lra=8.0, input_thresh=-28.0)
+
+        with patch.object(engine, "analyze_loudness", return_value=metrics), \
+             patch.object(engine, "probe", return_value={"streams": [{"codec_type": "audio", "sample_rate": "44100", "bit_rate": "256000", "bits_per_raw_sample": "16"}], "format": {}}), \
+             patch("subprocess.run") as mock_run, \
+             patch("core.metadata_handler.MetadataHandler.copy_all"):
+
+            mock_run.return_value = MagicMock(stdout="", stderr="", returncode=0)
+            result = engine.normalize(source, dest, target_i=-11.0, target_tp=-0.5, target_lra=10.0)
+
+        assert result.status == "normalized"
+        called_cmd = mock_run.call_args[0][0]
+        cmd_str = " ".join(called_cmd)
+        assert "loudnorm=I=-11.0:TP=-0.5:LRA=10.0" in cmd_str
+
+    def test_bypass_requires_matching_container(self, tmp_path: Path) -> None:
+        """Mesmo com loudness dentro da faixa, extensão diferente impede stream copy."""
+        engine = FFmpegEngine.__new__(FFmpegEngine)
+        engine.ffmpeg_path = Path("ffmpeg")
+        engine.ffprobe_path = Path("ffprobe")
+
+        source = tmp_path / "src.wav"
+        dest = tmp_path / "dst.mp3"
+        source.write_bytes(b"RIFF")
+
+        metrics = LoudnessMetrics(input_i=-14.0, input_tp=-1.5, input_lra=5.0, input_thresh=-24.0)
+
+        with patch.object(engine, "analyze_loudness", return_value=metrics), \
+             patch.object(engine, "probe", return_value={"streams": [{"codec_type": "audio", "sample_rate": "44100", "bit_rate": "1411200", "bits_per_raw_sample": "16"}], "format": {}}), \
+             patch("subprocess.run") as mock_run, \
+             patch("core.metadata_handler.MetadataHandler.copy_all"):
+
+            mock_run.return_value = MagicMock(stdout="", stderr="", returncode=0)
+            result = engine.normalize(source, dest)
+
+        # Não deve ser bypass porque WAV -> MP3 exige transcodificação
+        assert result.status == "normalized"
+        called_cmd = mock_run.call_args[0][0]
+        assert "libmp3lame" in called_cmd
+
+    def test_audio_bitrate_lossless_source_320k(self) -> None:
+        """Fontes com bitrate > 1000k (ex: WAV 1411k) devem receber 320k em MP3."""
+        assert FFmpegEngine._audio_bitrate(1411200) == "320k"
+        assert FFmpegEngine._audio_bitrate(256000) == "256k"
+        assert FFmpegEngine._audio_bitrate(128000) == "192k"  # clamp min 192k

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot, QThreadPool
 
-from core.ffmpeg_engine import FFmpegEngine, NormalizationResult
+from core.ffmpeg_engine import FFmpegEngine, NormalizationResult, LoudnessMetrics
 from core.audio_analyzer import AudioAnalyzer
 from core.metadata_handler import MetadataHandler
 
@@ -126,22 +126,12 @@ class AnalysisWorker(QRunnable):
         self.signals.finished.emit()
 
     def _format_duration(self, info, path: Path) -> str:
-        """Obtém duração real via ffprobe."""
-        try:
-            # Tenta obter duração do container via ffprobe
-            result = self.engine._run([
-                str(self.engine.ffprobe_path), "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                str(path)
-            ], capture_output=True)
-            if result.stdout:
-                seconds = float(result.stdout.strip())
-                mins = int(seconds // 60)
-                secs = int(seconds % 60)
-                return f"{mins}:{secs:02d}"
-        except Exception:
-            pass
+        """Obtém duração real a partir das métricas inspecionadas."""
+        if getattr(info, "duration", None) is not None:
+            seconds = float(info.duration)
+            mins = int(seconds // 60)
+            secs = int(seconds % 60)
+            return f"{mins}:{secs:02d}"
 
         # Fallback: estimativa via bitrate/tamanho
         try:
@@ -175,10 +165,9 @@ class BatchWorker(QRunnable):
     Executa FFmpegEngine.normalize + MetadataHandler + atualização de manifesto.
     """
 
-    def __init__(self, main_window: "MainWindow", selected_rows: list[int], settings: dict):
+    def __init__(self, tracks: list[dict], settings: dict):
         super().__init__()
-        self.main_window = main_window
-        self.selected_rows = selected_rows
+        self.tracks = tracks
         self.settings = settings
         self.signals = BatchSignals()
         self._cancelled = False
@@ -190,7 +179,7 @@ class BatchWorker(QRunnable):
 
     @Slot()
     def run(self) -> None:
-        total = len(self.selected_rows)
+        total = len(self.tracks)
         if total == 0:
             self.signals.finished.emit(True, "Nenhuma faixa para processar")
             return
@@ -219,18 +208,23 @@ class BatchWorker(QRunnable):
         overwrite_choice = self.settings.get("overwrite_choice", "rename")
         overwrite_apply_all = self.settings.get("overwrite_apply_all", False)
 
-        for idx, row in enumerate(self.selected_rows):
+        target_lufs = self.settings.get("target_loudness", -14.0)
+        target_tp = self.settings.get("target_true_peak", -1.0)
+        target_lra = self.settings.get("target_lra", 11.0)
+
+        for idx, track_data in enumerate(self.tracks):
             if self._cancelled:
                 self.signals.cancelled.emit()
                 return
 
-            track_data = self.main_window.music_table.get_track_data(row)
-            if not track_data:
+            row = track_data.get("row", idx)
+            source_str = track_data.get("path")
+            if not source_str:
                 error_messages.append(f"Linha {row}: dados da faixa não encontrados")
                 self.signals.track_failed.emit(row, "Dados da faixa não encontrados")
                 continue
 
-            source_path = Path(track_data["path"])
+            source_path = Path(source_str)
             dest_path = output_folder / source_path.name
 
             # Verifica se já foi processado (bypass via manifesto)
@@ -239,16 +233,16 @@ class BatchWorker(QRunnable):
                 existing = manifest["entries"][manifest_key]
                 # Se o arquivo de destino existe e parâmetros são iguais, pula
                 if Path(existing.get("destination", "")).exists():
-                    if (existing.get("target_lufs") == self.settings.get("target_loudness", -14.0) and
-                        existing.get("target_true_peak") == self.settings.get("target_true_peak", -1.0)):
+                    if (existing.get("target_lufs") == target_lufs and
+                        existing.get("target_true_peak") == target_tp):
                         self.signals.track_finished.emit(row, NormalizationResult(
                             status="bypass",
-                            input_metrics=type('obj', (object,), {
-                                'input_i': existing.get('input_lufs', 0),
-                                'input_tp': existing.get('input_true_peak', 0),
-                                'input_lra': 0,
-                                'input_thresh': 0
-                            })(),
+                            input_metrics=LoudnessMetrics(
+                                input_i=float(existing.get('input_lufs', 0.0)),
+                                input_tp=float(existing.get('input_true_peak', 0.0)),
+                                input_lra=0.0,
+                                input_thresh=0.0,
+                            ),
                             post_validation=None
                         ))
                         success_count += 1
@@ -261,9 +255,9 @@ class BatchWorker(QRunnable):
                     # Pula este arquivo
                     self.signals.track_finished.emit(row, NormalizationResult(
                         status="skipped",
-                        input_metrics=type('obj', (object,), {
-                            'input_i': 0, 'input_tp': 0, 'input_lra': 0, 'input_thresh': 0
-                        })(),
+                        input_metrics=LoudnessMetrics(
+                            input_i=0.0, input_tp=0.0, input_lra=0.0, input_thresh=0.0
+                        ),
                         post_validation=None
                     ))
                     success_count += 1
@@ -282,7 +276,13 @@ class BatchWorker(QRunnable):
             self.signals.track_started.emit(row)
 
             try:
-                result = self.engine.normalize(str(source_path), str(dest_path))
+                result = self.engine.normalize(
+                    str(source_path),
+                    str(dest_path),
+                    target_i=target_lufs,
+                    target_tp=target_tp,
+                    target_lra=target_lra,
+                )
                 self._update_manifest(manifest, source_path, dest_path, result)
 
                 self.signals.track_finished.emit(row, result)
@@ -385,11 +385,9 @@ class FolderScanWorker(QRunnable):
         try:
             if not self.folder_path.exists():
                 self.signals.error.emit(f"Pasta não encontrada: {self.folder_path}")
-                self.signals.finished.emit()
                 return
             if not self.folder_path.is_dir():
                 self.signals.error.emit(f"Caminho não é uma pasta: {self.folder_path}")
-                self.signals.finished.emit()
                 return
 
             files = []
@@ -424,14 +422,17 @@ class WorkerManager:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._pool = QThreadPool.globalInstance()
-            cls._pool.setMaxThreadCount(2)  # Limita para não saturar CPU/Disco
+            # Ajusta paralelismo baseado em CPU (mínimo 2, máximo 4 para não saturar I/O)
+            threads = max(2, min(4, (os.cpu_count() or 2) // 2))
+            cls._pool.setMaxThreadCount(threads)
         return cls._instance
 
     @classmethod
     def pool(cls) -> QThreadPool:
         if cls._pool is None:
             cls._pool = QThreadPool.globalInstance()
-            cls._pool.setMaxThreadCount(2)
+            threads = max(2, min(4, (os.cpu_count() or 2) // 2))
+            cls._pool.setMaxThreadCount(threads)
         return cls._pool
 
     @classmethod
@@ -441,8 +442,8 @@ class WorkerManager:
         return worker
 
     @classmethod
-    def start_batch(cls, main_window: "MainWindow", selected_rows: list[int], settings: dict) -> BatchWorker:
-        worker = BatchWorker(main_window, selected_rows, settings)
+    def start_batch(cls, tracks: list[dict], settings: dict) -> BatchWorker:
+        worker = BatchWorker(tracks, settings)
         cls.pool().start(worker)
         return worker
 

@@ -27,17 +27,30 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QCheckBox,
+    QComboBox,
     QVBoxLayout as QVBoxLayoutWidget,
 )
 
-from .music_table import MusicTableWidget, MOCK_TRACKS
-from .inspector_panel import InspectorPanel
-from .styles import get_stylesheet
-from .workers import WorkerManager, AnalysisWorker, BatchWorker, FolderScanWorker
-from .constants import UIStrings, SettingsKeys, Shortcuts, Defaults, SUPPORTED_AUDIO_EXTS
+if __package__ is None or __package__ == "":
+    import sys
+    from pathlib import Path
+    _proj_root = str(Path(__file__).resolve().parents[1])
+    if _proj_root not in sys.path:
+        sys.path.insert(0, _proj_root)
+    from ui.music_table import MusicTableWidget, MOCK_TRACKS
+    from ui.inspector_panel import InspectorPanel
+    from ui.styles import get_stylesheet
+    from ui.workers import WorkerManager, AnalysisWorker, BatchWorker, FolderScanWorker
+    from ui.constants import UIStrings, SettingsKeys, Shortcuts, Defaults, SUPPORTED_AUDIO_EXTS
+else:
+    from .music_table import MusicTableWidget, MOCK_TRACKS
+    from .inspector_panel import InspectorPanel
+    from .styles import get_stylesheet
+    from .workers import WorkerManager, AnalysisWorker, BatchWorker, FolderScanWorker
+    from .constants import UIStrings, SettingsKeys, Shortcuts, Defaults, SUPPORTED_AUDIO_EXTS
 
 if TYPE_CHECKING:
-    from .workers import NormalizationResult
+    from ui.workers import NormalizationResult
 
 
 class OverwriteDialog(QDialog):
@@ -185,6 +198,8 @@ class MainWindow(QMainWindow):
         state = self._settings.value(SettingsKeys.WINDOW_STATE)
         if state:
             self.restoreState(state)
+        if self.isMinimized():
+            self.showNormal()
 
         # Splitter
         splitter_state = self._settings.value(SettingsKeys.SPLITTER_STATE)
@@ -430,10 +445,11 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(get_stylesheet())
 
     def _load_mock_data(self) -> None:
-        """Carrega dados de exemplo para validação visual."""
-        for track in MOCK_TRACKS:
-            self.music_table.add_track(track)
-        self._update_selection_count()
+        """Carrega dados de exemplo para validação visual se MUSIC_ENHANCER_MOCK=1."""
+        if os.environ.get("MUSIC_ENHANCER_MOCK") == "1":
+            for track in MOCK_TRACKS:
+                self.music_table.add_track(track)
+            self._update_selection_count()
 
     # ------------------------------------------------------------------
     # Slots / Handlers
@@ -721,7 +737,17 @@ class MainWindow(QMainWindow):
         if not selected_rows:
             return
 
-        self._batch_worker = WorkerManager.start_batch(self, selected_rows, settings)
+        tracks_to_process = []
+        for row in selected_rows:
+            track_data = self.music_table.get_track_data(row)
+            if track_data and track_data.get("path"):
+                track_data["row"] = row
+                tracks_to_process.append(track_data)
+
+        if not tracks_to_process:
+            return
+
+        self._batch_worker = WorkerManager.start_batch(tracks_to_process, settings)
         self._batch_worker.signals.track_started.connect(lambda row: self.music_table.update_row_status(row, "pending", "Processando…"))
         self._batch_worker.signals.track_finished.connect(self._on_track_batch_finished)
         self._batch_worker.signals.track_failed.connect(self._on_track_batch_failed)
@@ -734,8 +760,15 @@ class MainWindow(QMainWindow):
         self.batch_finished(success, message)
 
     def _on_track_batch_finished(self, row: int, result: "NormalizationResult") -> None:
-        status_key = "bypass" if result.status == "bypass" else "completed"
-        status_text = UIStrings.STATUS_TEXT.get(status_key, "Concluído")
+        if result.status == "bypass":
+            status_key = "bypass"
+            status_text = UIStrings.STATUS_TEXT.get("bypass", "Copiado (Bypass)")
+        elif result.status == "skipped":
+            status_key = "pending"
+            status_text = "Ignorado"
+        else:
+            status_key = "completed"
+            status_text = UIStrings.STATUS_TEXT.get("completed", "Concluído")
         self.music_table.update_row_status(row, status_key, status_text)
 
     def _on_track_batch_failed(self, row: int, error: str) -> None:
@@ -750,3 +783,15 @@ class MainWindow(QMainWindow):
             self._folder_scan_worker.cancel()
         WorkerManager.cancel_all()
         self.batch_finished(False, UIStrings.MSG_BATCH_CANCELLED)
+
+
+if __name__ == "__main__":
+    import sys
+    from pathlib import Path
+
+    root_dir = str(Path(__file__).resolve().parents[1])
+    if root_dir not in sys.path:
+        sys.path.insert(0, root_dir)
+
+    from main import main
+    sys.exit(main())

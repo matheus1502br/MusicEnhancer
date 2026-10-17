@@ -41,12 +41,22 @@ def setup_application() -> QApplication:
 
 
 def main() -> int:
-    app = setup_application()
+    try:
+        print("[MusicEnhancer] Inicializando aplicação...")
+        app = setup_application()
 
-    window = MainWindow()
-    window.show()
+        window = MainWindow()
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        print("[MusicEnhancer] Janela principal pronta e em primeiro plano.")
 
-    return app.exec()
+        return app.exec()
+    except Exception as exc:
+        import traceback
+        print(f"[MusicEnhancer] Erro crítico ao iniciar aplicação: {exc}")
+        traceback.print_exc()
+        return 1
 
 
 if __name__ == "__main__":

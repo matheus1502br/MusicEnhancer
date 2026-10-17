@@ -196,7 +196,9 @@ class MusicTableWidget(QTableWidget):
 
         # Tooltips nos cabeçalhos
         for col, tooltip in UIStrings.TABLE_HEADER_TOOLTIPS.items():
-            self.horizontalHeader().setToolTip(tooltip)
+            header_item = self.horizontalHeaderItem(col)
+            if header_item:
+                header_item.setToolTip(tooltip)
 
         header = self.horizontalHeader()
         header.setStretchLastSection(False)
@@ -461,6 +463,12 @@ class MusicTableWidget(QTableWidget):
     def _on_checkbox_changed(self, state: int) -> None:
         checkbox = self.sender()
         if isinstance(checkbox, QCheckBox):
+            parent = checkbox.parentWidget()
+            if parent:
+                row = self.indexAt(parent.pos()).row()
+                if row >= 0:
+                    self.row_selection_changed.emit(row, bool(state))
+                    return
             row = checkbox.property("row")
             if row is not None:
                 self.row_selection_changed.emit(row, bool(state))

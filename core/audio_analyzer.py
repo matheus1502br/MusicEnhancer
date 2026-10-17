@@ -19,6 +19,7 @@ class AudioMetrics:
     bits_per_raw_sample: int | None
     codec_name: str | None
     channels: int | None
+    duration: float | None = None
 
 
 class AudioAnalyzer:
@@ -43,17 +44,26 @@ class AudioAnalyzer:
             except (TypeError, ValueError):
                 return None
 
+        def as_float(value: Any) -> float | None:
+            try:
+                return float(value) if value not in (None, "N/A", "") else None
+            except (TypeError, ValueError):
+                return None
+
         # WAV frequentemente só preenche bits_per_sample; formatos codificados podem
         # não informar profundidade, caso em que a validação não é aplicável.
         bit_depth = as_int(stream.get("bits_per_raw_sample")) or as_int(
             stream.get("bits_per_sample")
         )
+        duration = as_float(stream.get("duration")) or as_float(data.get("format", {}).get("duration"))
+
         return AudioMetrics(
             sample_rate=as_int(stream.get("sample_rate")),
             bit_rate=as_int(stream.get("bit_rate")) or as_int(data.get("format", {}).get("bit_rate")),
             bits_per_raw_sample=bit_depth,
             codec_name=stream.get("codec_name"),
             channels=as_int(stream.get("channels")),
+            duration=duration,
         )
 
     def validate_lossless_export(
