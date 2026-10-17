@@ -1,63 +1,53 @@
-#!/usr/bin/env python3
-"""Ponto de entrada do MusicEnhancer — Inicializa a aplicação PySide6."""
-
-from __future__ import annotations
-
 import sys
-import os
-
-# Garante que o diretório do projeto está no path para imports relativos
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-
+import logging
+import traceback
 from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QFontDatabase
 
-from ui.main_window import MainWindow
-from ui.styles import get_stylesheet
+# Configuração de Logs (sobrescreve o arquivo a cada execução com mode='w')
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.FileHandler("musicenhancer.log", mode="w", encoding="utf-8"),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 
+logger = logging.getLogger("MusicEnhancer")
 
-def setup_application() -> QApplication:
-    """Configura e retorna a instância do QApplication."""
-    # Qt6 gerencia High DPI nativamente — não requer atributos AA_EnableHighDpiScaling
-    app = QApplication(sys.argv)
-    app.setApplicationName("MusicEnhancer")
-    app.setApplicationVersion("0.3.0")
-    app.setOrganizationName("MusicEnhancer")
-    app.setOrganizationDomain("musicenhancer.local")
+def handle_exception(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    logger.critical("Exceção não tratada capturada no arranque:", exc_info=(exc_type, exc_value, exc_traceback))
 
-    # Aplica stylesheet global
-    app.setStyleSheet(get_stylesheet())
+sys.excepthook = handle_exception
 
-    # Tenta registrar fontes adicionais se existirem (opcional)
-    fonts_dir = os.path.join(PROJECT_ROOT, "assets", "fonts")
-    if os.path.isdir(fonts_dir):
-        for font_file in os.listdir(fonts_dir):
-            if font_file.lower().endswith((".ttf", ".otf")):
-                QFontDatabase.addApplicationFont(os.path.join(fonts_dir, font_file))
+logger.info("=== Inicializando MusicEnhancer ===")
 
-    return app
+# Inicialização do QApplication
+app = QApplication(sys.argv)
 
+try:
+    # Carregamento de configurações
+    logger.debug("Lendo configurações do QSettings")
+    
+    load_config()
 
-def main() -> int:
-    try:
-        print("[MusicEnhancer] Inicializando aplicação...")
-        app = setup_application()
+    # Carregamento de estilos QSS
+    logger.debug("Carregando estilos QSS")
+    from ui.styles import apply_styles
+    apply_styles()
 
-        window = MainWindow()
-        window.show()
-        window.raise_()
-        window.activateWindow()
-        print("[MusicEnhancer] Janela principal pronta e em primeiro plano.")
+    # Instanciação do MainWindow
+    logger.debug("Instanciando MainWindow")
+    from mainwindow import MainWindow
+    window = MainWindow()
+    window.show()
 
-        return app.exec()
-    except Exception as exc:
-        import traceback
-        print(f"[MusicEnhancer] Erro crítico ao iniciar aplicação: {exc}")
-        traceback.print_exc()
-        return 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    # Entrada no loop de eventos
+    logger.debug("Entrando no loop de eventos")
+    sys.exit(app.exec())
+except Exception as e:
+    logger.exception("Erro crítico durante a inicialização:")
+    sys.exit(1)
