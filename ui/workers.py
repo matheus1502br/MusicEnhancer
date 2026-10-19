@@ -88,10 +88,10 @@ class AnalysisWorker(QRunnable):
                 # Inspeção técnica (ffprobe)
                 info = self.analyzer.inspect(file_path)
 
-                # Determina status inicial
+                # Determina status inicial correto
                 bypass = -14.5 <= loudness.input_i <= -13.5 and loudness.input_tp <= -1.0
-                status_key = "analyzed" if not bypass else "pending"
-                status_text = "Analisado" if not bypass else "Pronto (Bypass)"
+                status_key = "bypass" if bypass else "analyzed"
+                status_text = "Pronto (Bypass)" if bypass else "Analisado"
 
                 track_data = {
                     "name": path.name,

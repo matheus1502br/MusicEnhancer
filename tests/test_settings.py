@@ -182,3 +182,4 @@ class TestShortcutsInitialization:
         seq = Shortcuts.ADD_FILES
         assert seq is not None
         assert "O" in seq.toString()
+

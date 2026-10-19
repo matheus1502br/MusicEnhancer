@@ -465,13 +465,9 @@ class MusicTableWidget(QTableWidget):
         if isinstance(checkbox, QCheckBox):
             parent = checkbox.parentWidget()
             if parent:
-                row = self.indexAt(parent.pos()).row()
-                if row >= 0:
-                    self.row_selection_changed.emit(row, bool(state))
-                    return
-            row = checkbox.property("row")
-            if row is not None:
-                self.row_selection_changed.emit(row, bool(state))
+                index = self.indexAt(parent.pos())
+                if index.isValid():
+                    self.row_selection_changed.emit(index.row(), bool(state))
 
     # ------------------------------------------------------------------
     # Sinais personalizados
