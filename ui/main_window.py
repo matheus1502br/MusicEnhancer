@@ -137,7 +137,7 @@ class MainWindow(QMainWindow):
     folder_add_requested = Signal(str)        # caminho da pasta
     output_folder_changed = Signal(str)
 
-    def __init__(self):
+    def __init__(self, config: dict | None = None):
         super().__init__()
         self.setWindowTitle(UIStrings.WINDOW_TITLE)
         self.resize(Defaults.WINDOW_DEFAULT_WIDTH, Defaults.WINDOW_DEFAULT_HEIGHT)
@@ -147,6 +147,10 @@ class MainWindow(QMainWindow):
         self._analysis_worker: AnalysisWorker | None = None
         self._batch_worker: BatchWorker | None = None
         self._folder_scan_worker: FolderScanWorker | None = None
+
+        # Configurações do núcleo
+        from core.settings import load_config
+        self._config = config if config is not None else load_config()
 
         # QSettings
         self._settings = QSettings("MusicEnhancer", "MusicEnhancer")
@@ -212,13 +216,15 @@ class MainWindow(QMainWindow):
             self.music_table.horizontalHeader().restoreState(header_state)
 
         # Pasta de saída
-        output_folder = self._settings.value(SettingsKeys.OUTPUT_FOLDER, "")
+        default_out = self._config.get("output_folder", "")
+        output_folder = self._settings.value(SettingsKeys.OUTPUT_FOLDER, default_out)
         if output_folder and os.path.isdir(output_folder):
             self._output_folder = output_folder
             self.txt_output_folder.setText(output_folder)
 
         # Preset atual
-        preset = self._settings.value(SettingsKeys.CURRENT_PRESET, UIStrings.INSPECTOR_PRESETS[0])
+        default_preset = self._config.get("current_preset", UIStrings.INSPECTOR_PRESETS[0])
+        preset = self._settings.value(SettingsKeys.CURRENT_PRESET, default_preset)
         self.toolbar_preset.blockSignals(True)
         idx = self.toolbar_preset.findText(preset)
         if idx >= 0:
@@ -227,18 +233,23 @@ class MainWindow(QMainWindow):
         self.inspector.set_preset(preset)
 
         # Painel avançado expandido
-        advanced_expanded = self._settings.value(SettingsKeys.ADVANCED_EXPANDED, False, type=bool)
+        default_advanced = self._config.get("advanced_expanded", False)
+        advanced_expanded = self._settings.value(SettingsKeys.ADVANCED_EXPANDED, default_advanced, type=bool)
         self.inspector.advanced_group.setChecked(advanced_expanded)
 
         # Valores avançados
-        target_loudness = self._settings.value(SettingsKeys.TARGET_LOUDNESS, Defaults.TARGET_LOUDNESS_STREAMING, type=float)
-        target_tp = self._settings.value(SettingsKeys.TARGET_TRUE_PEAK, Defaults.TARGET_TRUE_PEAK_DEFAULT, type=float)
+        default_lufs = self._config.get("target_loudness", Defaults.TARGET_LOUDNESS_STREAMING)
+        default_tp = self._config.get("target_true_peak", Defaults.TARGET_TRUE_PEAK_DEFAULT)
+        target_loudness = self._settings.value(SettingsKeys.TARGET_LOUDNESS, default_lufs, type=float)
+        target_tp = self._settings.value(SettingsKeys.TARGET_TRUE_PEAK, default_tp, type=float)
         self.inspector.target_loudness.setValue(target_loudness)
         self.inspector.target_true_peak.setValue(target_tp)
 
         # Escolha de sobrescrita
-        self._overwrite_choice = self._settings.value(SettingsKeys.OVERWRITE_CHOICE)
-        self._overwrite_apply_all = self._settings.value(SettingsKeys.OVERWRITE_APPLY_ALL, False, type=bool)
+        default_ow = self._config.get("overwrite_choice", "rename")
+        default_ow_all = self._config.get("overwrite_apply_all", False)
+        self._overwrite_choice = self._settings.value(SettingsKeys.OVERWRITE_CHOICE, default_ow)
+        self._overwrite_apply_all = self._settings.value(SettingsKeys.OVERWRITE_APPLY_ALL, default_ow_all, type=bool)
 
     def _save_settings(self) -> None:
         """Salva configurações atuais."""
@@ -256,6 +267,17 @@ class MainWindow(QMainWindow):
         if self._overwrite_choice:
             self._settings.setValue(SettingsKeys.OVERWRITE_CHOICE, self._overwrite_choice)
         self._settings.setValue(SettingsKeys.OVERWRITE_APPLY_ALL, self._overwrite_apply_all)
+
+        # Persiste também no arquivo de configuração do core
+        from core.settings import save_config
+        self._config["output_folder"] = self._output_folder
+        self._config["current_preset"] = self.toolbar_preset.currentText()
+        self._config["advanced_expanded"] = self.inspector.advanced_group.isChecked()
+        self._config["target_loudness"] = self.inspector.target_loudness.value()
+        self._config["target_true_peak"] = self.inspector.target_true_peak.value()
+        self._config["overwrite_choice"] = self._overwrite_choice
+        self._config["overwrite_apply_all"] = self._overwrite_apply_all
+        save_config(self._config)
 
     def closeEvent(self, event) -> None:
         self._save_settings()

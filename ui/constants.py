@@ -222,16 +222,30 @@ class SettingsKeys:
 # ATALHOS DE TECLADO (QKeySequence)
 # ============================================================
 
-class Shortcuts:
+class _ShortcutsMeta(type):
+    """Metaclasse para resolver atalhos de forma dinâmica e compatível entre plataformas."""
+
+    @property
+    def ADD_FILES(cls) -> QKeySequence:
+        from PySide6.QtGui import QGuiApplication
+        # Se QApplication/QGuiApplication existir, usa o atalho padrão do SO (Cmd+O no macOS, Ctrl+O no Windows/Linux)
+        if QGuiApplication.instance() is not None:
+            return QKeySequence(QKeySequence.StandardKey.Open)
+        # Fallback seguro para ambientes sem GUI ativa (ex: testes de unidade / importações estáticas)
+        return QKeySequence(Qt.KeyboardModifier.ControlModifier | Qt.Key.Key_O)
+
+
+class Shortcuts(metaclass=_ShortcutsMeta):
     """Atalhos globais da aplicação."""
 
-    ADD_FILES = QKeySequence(QKeySequence.StandardKey.Open)  # Ctrl+O
+    # ADD_FILES é resolvido via metaclasse de forma segura e multiplataforma
     ADD_FOLDER = QKeySequence(Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_O)  # Ctrl+Shift+O
     REMOVE_SELECTED = QKeySequence(Qt.Key.Key_Delete)  # Delete
     REMOVE_SELECTED_ALT = QKeySequence(Qt.Key.Key_Backspace)  # Backspace
     START_BATCH = QKeySequence(Qt.KeyboardModifier.ControlModifier, Qt.Key.Key_Return)  # Ctrl+Enter
     START_BATCH_ALT = QKeySequence(Qt.KeyboardModifier.ControlModifier, Qt.Key.Key_Enter)  # Ctrl+Enter (numpad)
     CANCEL_BATCH = QKeySequence(Qt.Key.Key_Escape)  # Esc
+
 
 
 # ============================================================
