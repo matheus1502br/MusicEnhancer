@@ -20,6 +20,8 @@ class AudioMetrics:
     codec_name: str | None
     channels: int | None
     duration: float | None = None
+    sample_fmt: str | None = None
+    channel_layout: str | None = None
 
 
 class AudioAnalyzer:
@@ -64,26 +66,82 @@ class AudioAnalyzer:
             codec_name=stream.get("codec_name"),
             channels=as_int(stream.get("channels")),
             duration=duration,
+            sample_fmt=stream.get("sample_fmt"),
+            channel_layout=stream.get("channel_layout"),
         )
+
+    def validate_export(
+        self,
+        source: str | Path,
+        output: str | Path,
+        *,
+        lossless: bool = True,
+        expected_sample_rate: int | None = None,
+        expected_channels: int | None = None,
+        expected_bit_depth: int | None = None,
+    ) -> tuple[bool, list[str]]:
+        """Confirma as propriedades técnicas da saída contra o esperado/origem.
+
+        Taxa de amostragem e canais são comparados sempre que ambos os lados
+        informam os valores. A profundidade de bits só é comparada para formatos
+        sem perdas e quando a informação está disponível. A duração é comparada
+        com tolerância para absorver o padding de codificadores como MP3/AAC.
+        """
+        original = self.inspect(source)
+        generated = self.inspect(output)
+        failures: list[str] = []
+
+        expected_rate = (
+            expected_sample_rate if expected_sample_rate is not None else original.sample_rate
+        )
+        if expected_rate is not None and generated.sample_rate is not None:
+            if generated.sample_rate != expected_rate:
+                failures.append(
+                    f"sample rate divergente ({expected_rate} != {generated.sample_rate})"
+                )
+
+        expected_ch = expected_channels if expected_channels is not None else original.channels
+        if expected_ch is not None and generated.channels is not None:
+            if generated.channels != expected_ch:
+                failures.append(
+                    f"canais divergentes ({expected_ch} != {generated.channels})"
+                )
+            elif (
+                expected_ch == original.channels
+                and original.channel_layout
+                and generated.channel_layout
+                and original.channel_layout != generated.channel_layout
+            ):
+                failures.append(
+                    "layout de canais divergente "
+                    f"({original.channel_layout} != {generated.channel_layout})"
+                )
+
+        if lossless:
+            expected_depth = (
+                expected_bit_depth
+                if expected_bit_depth is not None
+                else original.bits_per_raw_sample
+            )
+            if expected_depth is not None and generated.bits_per_raw_sample is not None:
+                if generated.bits_per_raw_sample != expected_depth:
+                    failures.append(
+                        "bit-depth divergente "
+                        f"({expected_depth} != {generated.bits_per_raw_sample})"
+                    )
+
+        if original.duration and generated.duration:
+            tolerance = max(0.5, original.duration * 0.02)
+            if abs(generated.duration - original.duration) > tolerance:
+                failures.append(
+                    "duração divergente "
+                    f"({original.duration:.3f}s != {generated.duration:.3f}s)"
+                )
+
+        return not failures, failures
 
     def validate_lossless_export(
         self, source: str | Path, output: str | Path
     ) -> tuple[bool, list[str]]:
-        """Confirma sample rate e bit-depth quando ambos os arquivos os informam."""
-        original = self.inspect(source)
-        generated = self.inspect(output)
-        failures: list[str] = []
-        if original.sample_rate != generated.sample_rate:
-            failures.append(
-                f"sample rate divergente ({original.sample_rate} != {generated.sample_rate})"
-            )
-        if (
-            original.bits_per_raw_sample is not None
-            and generated.bits_per_raw_sample is not None
-            and original.bits_per_raw_sample != generated.bits_per_raw_sample
-        ):
-            failures.append(
-                "bit-depth divergente "
-                f"({original.bits_per_raw_sample} != {generated.bits_per_raw_sample})"
-            )
-        return not failures, failures
+        """Compatibilidade: valida apenas propriedades de formatos sem perdas."""
+        return self.validate_export(source, output, lossless=True)

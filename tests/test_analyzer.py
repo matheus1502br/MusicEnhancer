@@ -129,3 +129,93 @@ class TestAudioAnalyzerValidateLosslessExport:
         ok, failures = analyzer.validate_lossless_export("original.flac", "output.flac")
         assert ok is True  # sample rate ok, bit-depth não comparado
         assert failures == []
+
+
+class TestAudioAnalyzerExportValidation:
+    """Validação estendida de taxa, canais, profundidade e duração."""
+
+    @staticmethod
+    def _analyzer(source_stream: dict, output_stream: dict) -> AudioAnalyzer:
+        engine = MagicMock(spec=FFmpegEngine)
+
+        def probe_side_effect(path):
+            stream = source_stream if "original" in str(path) else output_stream
+            return {"streams": [stream], "format": {}}
+
+        engine.probe.side_effect = probe_side_effect
+        return AudioAnalyzer(engine)
+
+    def test_inspect_exposes_sample_fmt_and_layout(self) -> None:
+        engine = MagicMock(spec=FFmpegEngine)
+        engine.probe.return_value = {
+            "streams": [{
+                "codec_type": "audio",
+                "codec_name": "pcm_f32le",
+                "sample_rate": "48000",
+                "bits_per_raw_sample": "32",
+                "channels": "2",
+                "channel_layout": "stereo",
+                "sample_fmt": "flt",
+            }],
+            "format": {},
+        }
+        metrics = AudioAnalyzer(engine).inspect("dummy.wav")
+        assert metrics.sample_fmt == "flt"
+        assert metrics.channel_layout == "stereo"
+
+    def test_validation_detects_channel_divergence(self) -> None:
+        analyzer = self._analyzer(
+            {"codec_type": "audio", "sample_rate": "48000", "channels": "2", "channel_layout": "stereo"},
+            {"codec_type": "audio", "sample_rate": "48000", "channels": "1", "channel_layout": "mono"},
+        )
+        ok, failures = analyzer.validate_export("original.wav", "output.wav")
+        assert ok is False
+        assert any("canais divergentes" in f for f in failures)
+
+    def test_validation_detects_layout_divergence(self) -> None:
+        analyzer = self._analyzer(
+            {"codec_type": "audio", "sample_rate": "48000", "channels": "2", "channel_layout": "stereo"},
+            {"codec_type": "audio", "sample_rate": "48000", "channels": "2", "channel_layout": "downmix"},
+        )
+        ok, failures = analyzer.validate_export("original.wav", "output.wav")
+        assert ok is False
+        assert any("layout de canais divergente" in f for f in failures)
+
+    def test_validation_accepts_expected_bit_depth_override(self) -> None:
+        """FLAC a partir de fonte de 32 bits é limitado a 24 bits."""
+        analyzer = self._analyzer(
+            {"codec_type": "audio", "sample_rate": "48000", "bits_per_raw_sample": "32"},
+            {"codec_type": "audio", "sample_rate": "48000", "bits_per_raw_sample": "24"},
+        )
+        ok, failures = analyzer.validate_export(
+            "original.wav", "output.flac", lossless=True, expected_bit_depth=24
+        )
+        assert ok is True
+        assert failures == []
+
+    def test_lossy_output_ignores_bit_depth(self) -> None:
+        analyzer = self._analyzer(
+            {"codec_type": "audio", "sample_rate": "48000", "bits_per_raw_sample": "24"},
+            {"codec_type": "audio", "sample_rate": "48000"},
+        )
+        ok, failures = analyzer.validate_export("original.wav", "output.mp3", lossless=False)
+        assert ok is True
+        assert failures == []
+
+    def test_validation_detects_duration_divergence(self) -> None:
+        analyzer = self._analyzer(
+            {"codec_type": "audio", "sample_rate": "48000", "duration": "120.0"},
+            {"codec_type": "audio", "sample_rate": "48000", "duration": "90.0"},
+        )
+        ok, failures = analyzer.validate_export("original.wav", "output.wav")
+        assert ok is False
+        assert any("duração divergente" in f for f in failures)
+
+    def test_validation_tolerates_small_duration_difference(self) -> None:
+        analyzer = self._analyzer(
+            {"codec_type": "audio", "sample_rate": "48000", "duration": "120.0"},
+            {"codec_type": "audio", "sample_rate": "48000", "duration": "120.05"},
+        )
+        ok, failures = analyzer.validate_export("original.wav", "output.mp3", lossless=False)
+        assert ok is True
+        assert failures == []

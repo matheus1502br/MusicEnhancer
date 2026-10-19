@@ -240,10 +240,13 @@ class MainWindow(QMainWindow):
         # Valores avançados
         default_lufs = self._config.get("target_loudness", Defaults.TARGET_LOUDNESS_STREAMING)
         default_tp = self._config.get("target_true_peak", Defaults.TARGET_TRUE_PEAK_DEFAULT)
+        default_lra = self._config.get("target_lra", Defaults.TARGET_LRA)
         target_loudness = self._settings.value(SettingsKeys.TARGET_LOUDNESS, default_lufs, type=float)
         target_tp = self._settings.value(SettingsKeys.TARGET_TRUE_PEAK, default_tp, type=float)
+        target_lra = self._settings.value(SettingsKeys.TARGET_LRA, default_lra, type=float)
         self.inspector.target_loudness.setValue(target_loudness)
         self.inspector.target_true_peak.setValue(target_tp)
+        self.inspector.target_lra.setValue(target_lra)
 
         # Escolha de sobrescrita
         default_ow = self._config.get("overwrite_choice", "rename")
@@ -264,6 +267,7 @@ class MainWindow(QMainWindow):
         self._settings.setValue(SettingsKeys.ADVANCED_EXPANDED, self.inspector.advanced_group.isChecked())
         self._settings.setValue(SettingsKeys.TARGET_LOUDNESS, self.inspector.target_loudness.value())
         self._settings.setValue(SettingsKeys.TARGET_TRUE_PEAK, self.inspector.target_true_peak.value())
+        self._settings.setValue(SettingsKeys.TARGET_LRA, self.inspector.target_lra.value())
         if self._overwrite_choice:
             self._settings.setValue(SettingsKeys.OVERWRITE_CHOICE, self._overwrite_choice)
         self._settings.setValue(SettingsKeys.OVERWRITE_APPLY_ALL, self._overwrite_apply_all)
@@ -275,6 +279,7 @@ class MainWindow(QMainWindow):
         self._config["advanced_expanded"] = self.inspector.advanced_group.isChecked()
         self._config["target_loudness"] = self.inspector.target_loudness.value()
         self._config["target_true_peak"] = self.inspector.target_true_peak.value()
+        self._config["target_lra"] = self.inspector.target_lra.value()
         self._config["overwrite_choice"] = self._overwrite_choice
         self._config["overwrite_apply_all"] = self._overwrite_apply_all
         save_config(self._config)
@@ -541,7 +546,9 @@ class MainWindow(QMainWindow):
             })
 
         self.status_bar.showMessage(UIStrings.MSG_ANALYZING.format(count=len(file_paths)))
-        self._analysis_worker = WorkerManager.start_analysis(file_paths, start_row)
+        self._analysis_worker = WorkerManager.start_analysis(
+            file_paths, start_row, self.inspector.get_current_settings()
+        )
         self._analysis_worker.signals.track_analyzed.connect(self._on_track_analyzed)
         self._analysis_worker.signals.track_failed.connect(self._on_track_analysis_failed)
         self._analysis_worker.signals.finished.connect(self._on_analysis_finished)

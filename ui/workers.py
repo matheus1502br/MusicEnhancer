@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import traceback
 from pathlib import Path
@@ -10,12 +11,21 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot, QThreadPool
 
-from core.ffmpeg_engine import FFmpegEngine, NormalizationResult, LoudnessMetrics
+from core.ffmpeg_engine import (
+    FFmpegEngine,
+    NormalizationResult,
+    LoudnessMetrics,
+    should_bypass,
+)
 from core.audio_analyzer import AudioAnalyzer
 from core.metadata_handler import MetadataHandler
+from core.settings import DEFAULT_CONFIG
 
 if TYPE_CHECKING:
     from ui.main_window import MainWindow
+
+
+logger = logging.getLogger(__name__)
 
 
 # =====================================================================
@@ -51,7 +61,7 @@ class AnalysisWorker(QRunnable):
     Preenche LUFS, True Peak, Duração, Bitrate, Sample Rate, Bit Depth na tabela.
     """
 
-    def __init__(self, file_paths: list[str], start_row: int):
+    def __init__(self, file_paths: list[str], start_row: int, targets: dict | None = None):
         super().__init__()
         self.file_paths = file_paths
         self.start_row = start_row
@@ -60,6 +70,11 @@ class AnalysisWorker(QRunnable):
         self.engine = FFmpegEngine()
         self.analyzer = AudioAnalyzer(self.engine)
         self.setAutoDelete(True)
+
+        # Alvos informados pela interface; cai para os padrões do núcleo.
+        targets = targets or {}
+        self.target_i = float(targets.get("target_loudness", DEFAULT_CONFIG["target_loudness"]))
+        self.target_tp = float(targets.get("target_true_peak", DEFAULT_CONFIG["target_true_peak"]))
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -88,8 +103,13 @@ class AnalysisWorker(QRunnable):
                 # Inspeção técnica (ffprobe)
                 info = self.analyzer.inspect(file_path)
 
-                # Determina status inicial correto
-                bypass = -14.5 <= loudness.input_i <= -13.5 and loudness.input_tp <= -1.0
+                # Determina status inicial correto respeitando os alvos do usuário
+                bypass = should_bypass(
+                    loudness,
+                    target_i=self.target_i,
+                    target_tp=self.target_tp,
+                    same_container=True,
+                )
                 status_key = "bypass" if bypass else "analyzed"
                 status_text = "Pronto (Bypass)" if bypass else "Analisado"
 
@@ -203,14 +223,15 @@ class BatchWorker(QRunnable):
 
         success_count = 0
         error_messages = []
+        warning_messages = []
 
         # Obtém preferências de sobrescrita
         overwrite_choice = self.settings.get("overwrite_choice", "rename")
         overwrite_apply_all = self.settings.get("overwrite_apply_all", False)
 
-        target_lufs = self.settings.get("target_loudness", -14.0)
-        target_tp = self.settings.get("target_true_peak", -1.0)
-        target_lra = self.settings.get("target_lra", 11.0)
+        target_lufs = self.settings.get("target_loudness", DEFAULT_CONFIG["target_loudness"])
+        target_tp = self.settings.get("target_true_peak", DEFAULT_CONFIG["target_true_peak"])
+        target_lra = self.settings.get("target_lra", DEFAULT_CONFIG["target_lra"])
 
         for idx, track_data in enumerate(self.tracks):
             if self._cancelled:
@@ -234,7 +255,8 @@ class BatchWorker(QRunnable):
                 # Se o arquivo de destino existe e parâmetros são iguais, pula
                 if Path(existing.get("destination", "")).exists():
                     if (existing.get("target_lufs") == target_lufs and
-                        existing.get("target_true_peak") == target_tp):
+                        existing.get("target_true_peak") == target_tp and
+                        existing.get("target_lra") == target_lra):
                         self.signals.track_finished.emit(row, NormalizationResult(
                             status="bypass",
                             input_metrics=LoudnessMetrics(
@@ -243,7 +265,9 @@ class BatchWorker(QRunnable):
                                 input_lra=0.0,
                                 input_thresh=0.0,
                             ),
-                            post_validation=None
+                            post_validation=None,
+                            normalization_type="bypass",
+                            metadata_preserved=bool(existing.get("metadata_preserved", True)),
                         ))
                         success_count += 1
                         self.signals.overall_progress.emit(idx + 1, total)
@@ -284,16 +308,28 @@ class BatchWorker(QRunnable):
                     target_lra=target_lra,
                 )
                 self._update_manifest(manifest, source_path, dest_path, result)
+                if result.warnings:
+                    for warning in result.warnings:
+                        warning_messages.append(f"{source_path.name}: {warning}")
+                    logger.warning(
+                        "Avisos ao processar '%s': %s",
+                        source_path.name,
+                        "; ".join(result.warnings),
+                    )
 
                 self.signals.track_finished.emit(row, result)
                 success_count += 1
 
-            except FileNotFoundError as e:
+            except FileNotFoundError:
                 error_msg = f"{source_path.name}: Arquivo de origem não encontrado"
                 error_messages.append(error_msg)
                 self.signals.track_failed.emit(row, error_msg)
-            except PermissionError as e:
+            except PermissionError:
                 error_msg = f"{source_path.name}: Sem permissão para ler/escrever"
+                error_messages.append(error_msg)
+                self.signals.track_failed.emit(row, error_msg)
+            except ValueError as e:
+                error_msg = f"{source_path.name}: Arquivo ou parâmetro inválido ({e})"
                 error_messages.append(error_msg)
                 self.signals.track_failed.emit(row, error_msg)
             except RuntimeError as e:
@@ -321,6 +357,10 @@ class BatchWorker(QRunnable):
             message += " Erros: " + "; ".join(error_messages[:3])
             if len(error_messages) > 3:
                 message += f" ... e mais {len(error_messages) - 3} erro(s)."
+        if warning_messages:
+            message += " Avisos: " + "; ".join(warning_messages[:3])
+            if len(warning_messages) > 3:
+                message += f" ... e mais {len(warning_messages) - 3} aviso(s)."
 
         self.signals.finished.emit(success, message)
 
@@ -347,10 +387,13 @@ class BatchWorker(QRunnable):
             "source": str(source),
             "destination": str(dest),
             "status": result.status,
+            "normalization_type": result.normalization_type,
+            "metadata_preserved": result.metadata_preserved,
             "input_lufs": result.input_metrics.input_i,
             "input_true_peak": result.input_metrics.input_tp,
-            "target_lufs": self.settings.get("target_loudness", -14.0),
-            "target_true_peak": self.settings.get("target_true_peak", -1.0),
+            "target_lufs": self.settings.get("target_loudness", DEFAULT_CONFIG["target_loudness"]),
+            "target_true_peak": self.settings.get("target_true_peak", DEFAULT_CONFIG["target_true_peak"]),
+            "target_lra": self.settings.get("target_lra", DEFAULT_CONFIG["target_lra"]),
         }
         manifest["entries"][str(source)] = entry
 
@@ -436,8 +479,8 @@ class WorkerManager:
         return cls._pool
 
     @classmethod
-    def start_analysis(cls, file_paths: list[str], start_row: int) -> AnalysisWorker:
-        worker = AnalysisWorker(file_paths, start_row)
+    def start_analysis(cls, file_paths: list[str], start_row: int, targets: dict | None = None) -> AnalysisWorker:
+        worker = AnalysisWorker(file_paths, start_row, targets)
         cls.pool().start(worker)
         return worker
 

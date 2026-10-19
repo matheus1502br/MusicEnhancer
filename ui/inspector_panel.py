@@ -177,7 +177,6 @@ class InspectorPanel(QWidget):
         self.target_lra.setDecimals(1)
         self.target_lra.setValue(UIStrings.INSPECTOR_LRA_DEFAULT)
         self.target_lra.setSuffix(" LU")
-        self.target_lra.setEnabled(False)  # Fixado em 11 LU por enquanto
         self.target_lra.setToolTip(UIStrings.INSPECTOR_LRA_TOOLTIP)
         self.target_lra.setMinimumWidth(140)
         adv_layout.addWidget(self.target_lra, 2, 1)

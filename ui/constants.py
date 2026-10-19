@@ -69,7 +69,7 @@ class UIStrings:
         "analyzed": "Loudness analisado; pronto para normalização",
         "peak_warn": "True Peak acima de -1,0 dBTP — risco de clipping ao converter para MP3/AAC",
         "completed": "Normalização aplicada com sucesso; metadados copiados",
-        "bypass": "Já dentro do alvo (-14,0 LUFS ±0,5; TP ≤ -1,0 dBTP); arquivo copiado sem recodificação",
+        "bypass": "Já dentro dos alvos configurados (loudness e True Peak); arquivo copiado sem recodificação",
         "error": "Falha no processamento — passe o mouse para ver detalhes",
     }
 
@@ -128,7 +128,7 @@ class UIStrings:
     INSPECTOR_TRUE_PEAK_DEFAULT = -1.0
 
     INSPECTOR_LRA_LABEL = "LRA Alvo (LU)"
-    INSPECTOR_LRA_TOOLTIP = "Loudness Range alvo (fixo em 11 LU para loudnorm linear)"
+    INSPECTOR_LRA_TOOLTIP = "Loudness Range alvo usado pelo loudnorm (1 a 50 LU)"
     INSPECTOR_LRA_DEFAULT = 11.0
 
     # Rodapé (Footer)
@@ -212,6 +212,7 @@ class SettingsKeys:
     ADVANCED_EXPANDED = "preferences/advancedExpanded"
     TARGET_LOUDNESS = "preferences/targetLoudness"
     TARGET_TRUE_PEAK = "preferences/targetTruePeak"
+    TARGET_LRA = "preferences/targetLra"
 
     # Overwrite dialog
     OVERWRITE_CHOICE = "batch/overwriteChoice"
